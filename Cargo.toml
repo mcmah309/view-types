@@ -1,0 +1,8 @@
+[package]
+name = "view_type"
+description = "A macro to create a view type data structure"
+license = "MIT"
+version = "0.0.1"
+edition = "2024"
+
+[dependencies]
