@@ -6,25 +6,43 @@ use syn::{
     token::{Brace, Paren},
     Expr, Ident, Pat, Token, Type, braced, parenthesized,
 };
-use std::collections::HashSet;
+use std::collections::HashMap;
 
-/// Top-level view specification containing types and field mappings
+/// Top-level view specification with fragments and structs
 #[derive(Debug, Clone)]
 pub struct ViewSpec {
-    pub types: Vec<Type>,
-    pub field_groups: Vec<FieldGroup>,
+    pub fragments: Vec<Fragment>,
+    pub view_structs: Vec<ViewStruct>,
 }
 
-/// A group of views with their field specifications
+/// A reusable fragment of fields
 #[derive(Debug, Clone)]
-pub struct FieldGroup {
-    pub view_names: Vec<Ident>,
+pub struct Fragment {
+    pub name: Ident,
     pub fields: Vec<FieldSpec>,
+}
+
+/// A view struct definition
+#[derive(Debug, Clone)]
+pub struct ViewStruct {
+    pub name: Ident,
+    pub generics: Option<syn::Generics>,
+    pub items: Vec<StructItem>,
+}
+
+/// Items that can appear in a struct definition
+#[derive(Debug, Clone)]
+pub enum StructItem {
+    /// Spread a fragment: `..fragment_name`
+    Spread(Ident),
+    /// Individual field: `field_name` or pattern
+    Field(FieldSpec),
 }
 
 /// Individual field specification with optional transformation
 #[derive(Debug, Clone)]
 pub struct FieldSpec {
+    pub pattern: Pat,
     pub transformation: Option<FieldTransformation>,
     pub field_name: Option<Ident>, // extracted from pattern if simple
 }
@@ -42,62 +60,48 @@ pub enum FieldTransformation {
 
 impl Parse for ViewSpec {
     fn parse(input: ParseStream) -> Result<Self> {
-        let mut types = Vec::new();
-        let mut field_groups = Vec::new();
+        let mut fragments = Vec::new();
+        let mut view_structs = Vec::new();
 
-        // Parse the types() declaration first
-        if input.peek(Ident) && input.peek2(Paren) {
-            let types_ident: Ident = input.parse()?;
-            if types_ident != "types" {
-                return Err(syn::Error::new(types_ident.span(), "Expected 'types'"));
-            }
-
-            let content;
-            parenthesized!(content in input);
-            let type_list: Punctuated<Type, Token![,]> = content.parse_terminated(Type::parse, Token![,])?;
-            types = type_list.into_iter().collect();
-
-            // Consume optional comma after types()
-            if input.peek(Token![,]) {
-                input.parse::<Token![,]>()?;
-            }
-        }
-
-        // Parse field groups
         while !input.is_empty() {
-            let field_group = input.parse::<FieldGroup>()?;
-            field_groups.push(field_group);
-
-            // Consume optional trailing comma
-            if input.peek(Token![,]) {
-                input.parse::<Token![,]>()?;
+            let lookahead = input.lookahead1();
+            if lookahead.peek(Ident) {
+                // Check if it's "fragment"
+                let fork = input.fork();
+                let ident: Ident = fork.parse()?;
+                
+                if ident == "fragment" {
+                    let fragment = input.parse::<Fragment>()?;
+                    fragments.push(fragment);
+                } else {
+                    return Err(syn::Error::new(ident.span(), "Expected 'fragment' or 'struct'"));
+                }
+            } else if lookahead.peek(Token![struct]) {
+                let view_struct = input.parse::<ViewStruct>()?;
+                view_structs.push(view_struct);
+            } else {
+                return Err(lookahead.error());
             }
         }
 
         Ok(ViewSpec {
-            types,
-            field_groups,
+            fragments,
+            view_structs,
         })
     }
 }
 
-impl Parse for FieldGroup {
+impl Parse for Fragment {
     fn parse(input: ParseStream) -> Result<Self> {
-        let mut view_names = Vec::new();
-
-        // Parse view names separated by |
-        loop {
-            let view_name: Ident = input.parse()?;
-            view_names.push(view_name);
-
-            if input.peek(Token![|]) {
-                input.parse::<Token![|]>()?;
-            } else {
-                break;
-            }
+        let fragment_keyword: Ident = input.parse()?;
+        if fragment_keyword != "fragment" {
+            return Err(syn::Error::new(
+                fragment_keyword.span(),
+                "Expected 'fragment'"
+            ));
         }
+        let name: Ident = input.parse()?;
 
-        // Parse the field block
         let content;
         braced!(content in input);
 
@@ -112,9 +116,48 @@ impl Parse for FieldGroup {
             }
         }
 
-        Ok(FieldGroup {
-            view_names,
-            fields,
+        Ok(Fragment { name, fields })
+    }
+}
+
+impl Parse for ViewStruct {
+    fn parse(input: ParseStream) -> Result<Self> {
+        input.parse::<Token![struct]>()?;
+        let name: Ident = input.parse()?;
+
+        // Parse optional generics
+        let generics = if input.peek(Token![<]) {
+            Some(input.parse::<syn::Generics>()?)
+        } else {
+            None
+        };
+
+        let content;
+        braced!(content in input);
+
+        let mut items = Vec::new();
+        while !content.is_empty() {
+            if content.peek(Token![..]) {
+                // Spread syntax
+                content.parse::<Token![..]>()?;
+                let fragment_name: Ident = content.parse()?;
+                items.push(StructItem::Spread(fragment_name));
+            } else {
+                // Individual field
+                let field_spec = content.parse::<FieldSpec>()?;
+                items.push(StructItem::Field(field_spec));
+            }
+
+            // Consume optional comma
+            if content.peek(Token![,]) {
+                content.parse::<Token![,]>()?;
+            }
+        }
+
+        Ok(ViewStruct {
+            name,
+            generics,
+            items,
         })
     }
 }
@@ -137,6 +180,7 @@ impl Parse for FieldSpec {
         };
 
         Ok(FieldSpec {
+            pattern,
             transformation,
             field_name,
         })
@@ -308,26 +352,38 @@ fn extract_field_name_from_pattern(pattern: &Pat) -> Option<Ident> {
     }
 }
 
-/// Helper function to extract view names from field groups
-pub fn extract_all_view_names(field_groups: &[FieldGroup]) -> HashSet<String> {
-    let mut view_names = HashSet::new();
-    for group in field_groups {
-        for view_name in &group.view_names {
-            view_names.insert(view_name.to_string());
-        }
-    }
-    view_names
-}
+/// Helper function to get all fields for a view struct by resolving fragments
+pub fn resolve_view_fields<'a>(
+    view_struct: &'a ViewStruct, 
+    fragments: &'a [Fragment]
+) -> Result<Vec<&'a FieldSpec>> {
+    let fragment_map: HashMap<String, &Fragment> = fragments
+        .iter()
+        .map(|f| (f.name.to_string(), f))
+        .collect();
 
-/// Helper function to get fields for a specific view
-pub fn get_fields_for_view<'a>(field_groups: &'a [FieldGroup], view_name: &str) -> Vec<&'a FieldSpec> {
-    let mut fields = Vec::new();
-    for group in field_groups {
-        if group.view_names.iter().any(|name| name.to_string() == view_name) {
-            fields.extend(&group.fields);
+    let mut resolved_fields = Vec::new();
+
+    for item in &view_struct.items {
+        match item {
+            StructItem::Spread(fragment_name) => {
+                let fragment_name_str = fragment_name.to_string();
+                if let Some(fragment) = fragment_map.get(&fragment_name_str) {
+                    resolved_fields.extend(&fragment.fields);
+                } else {
+                    return Err(syn::Error::new(
+                        fragment_name.span(),
+                        format!("Fragment '{}' not found", fragment_name_str)
+                    ));
+                }
+            }
+            StructItem::Field(field_spec) => {
+                resolved_fields.push(field_spec);
+            }
         }
     }
-    fields
+
+    Ok(resolved_fields)
 }
 
 /// Helper function to check if a pattern represents an unwrapping operation
@@ -392,123 +448,104 @@ mod tests {
     use syn::parse_quote;
 
     #[test]
-    fn test_parse_simple_field_group() {
+    fn test_parse_fragment() {
         let input = parse_quote! {
-            KeywordSearch | SemanticSearch {
+            fragment all {
                 offset,
                 limit
             }
         };
         
-        let field_group: FieldGroup = syn::parse2(input).unwrap();
-        assert_eq!(field_group.view_names.len(), 2);
-        assert_eq!(field_group.view_names[0].to_string(), "KeywordSearch");
-        assert_eq!(field_group.view_names[1].to_string(), "SemanticSearch");
-        assert_eq!(field_group.fields.len(), 2);
+        let fragment: Fragment = syn::parse2(input).unwrap();
+        assert_eq!(fragment.name.to_string(), "all");
+        assert_eq!(fragment.fields.len(), 2);
     }
 
     #[test]
-    fn test_parse_unwrap_pattern() {
+    fn test_parse_view_struct() {
         let input = parse_quote! {
-            KeywordSearch {
-                Some(query),
-                Option::Some(searchable_attributes),
-                EnumType::Branch(value)
+            struct KeywordSearch<'a> {
+                ..all,
+                ..keyword,
+                custom_field
             }
         };
         
-        let field_group: FieldGroup = syn::parse2(input).unwrap();
-        assert_eq!(field_group.fields.len(), 3);
+        let view_struct: ViewStruct = syn::parse2(input).unwrap();
+        assert_eq!(view_struct.name.to_string(), "KeywordSearch");
+        assert!(view_struct.generics.is_some());
+        assert_eq!(view_struct.items.len(), 3);
         
-        for field in &field_group.fields {
-            assert!(is_unwrap_pattern(&field.pattern));
-        }
-        
-        // Test specific pattern types
-        assert!(is_pattern_type(&field_group.fields[0].pattern, "Some"));
-        assert!(is_pattern_type(&field_group.fields[1].pattern, "Some"));
-        assert!(is_pattern_type(&field_group.fields[2].pattern, "Branch"));
-    }
-
-    #[test]
-    fn test_parse_complex_patterns() {
-        let input = parse_quote! {
-            KeywordSearch {
-                EnumType::Branch(value),
-                std::option::Option::Some(query),
-                MyEnum::Variant(x, y)
-            }
-        };
-        
-        let field_group: FieldGroup = syn::parse2(input).unwrap();
-        assert_eq!(field_group.fields.len(), 3);
-        
-        // All should be recognized as unwrap patterns
-        for field in &field_group.fields {
-            assert!(is_unwrap_pattern(&field.pattern));
+        // Check spread items
+        if let StructItem::Spread(name) = &view_struct.items[0] {
+            assert_eq!(name.to_string(), "all");
+        } else {
+            panic!("Expected spread item");
         }
     }
 
     #[test]
-    fn test_parse_with_transformation() {
+    fn test_parse_fragment_with_transformations() {
         let input = parse_quote! {
-            SemanticSearch {
-                Some(semantic) = valid_semantic_value(semantic)
+            fragment semantic {
+                Some(semantic) = valid_semantic_value(semantic),
+                Some(query)
             }
         };
         
-        let field_group: FieldGroup = syn::parse2(input).unwrap();
-        assert_eq!(field_group.fields.len(), 1);
-        assert!(has_transformation(&field_group.fields[0]));
+        let fragment: Fragment = syn::parse2(input).unwrap();
+        assert_eq!(fragment.fields.len(), 2);
+        assert!(has_transformation(&fragment.fields[0]));
+        assert!(!has_transformation(&fragment.fields[1]));
     }
 
     #[test]
     fn test_parse_full_view_spec() {
         let input = parse_quote! {
-            types(KeywordSearch<'a>, SemanticSearch, HybridSearch<'a>),
-            KeywordSearch | SemanticSearch | HybridSearch {
+            fragment all {
                 offset,
                 limit
-            },
-            SemanticSearch | HybridSearch {
-                Some(semantic) = valid_semantic_value(semantic)
-            },
-            KeywordSearch | HybridSearch {
+            }
+            fragment keyword {
                 Some(query),
-                Some(searchable_attributes)
+                words_limit
+            }
+            struct KeywordSearch<'a> {
+                ..all,
+                ..keyword
+            }
+            struct SemanticSearch {
+                ..all,
+                semantic_field
             }
         };
         
         let view_spec: ViewSpec = syn::parse2(input).unwrap();
-        assert_eq!(view_spec.types.len(), 3);
-        assert_eq!(view_spec.field_groups.len(), 3);
-        
-        // Check that we can extract all view names
-        let view_names = extract_all_view_names(&view_spec.field_groups);
-        assert!(view_names.contains("KeywordSearch"));
-        assert!(view_names.contains("SemanticSearch"));
-        assert!(view_names.contains("HybridSearch"));
+        assert_eq!(view_spec.fragments.len(), 2);
+        assert_eq!(view_spec.view_structs.len(), 2);
     }
 
     #[test]
-    fn test_get_fields_for_view() {
+    fn test_resolve_view_fields() {
         let input = parse_quote! {
-            types(KeywordSearch, SemanticSearch),
-            KeywordSearch | SemanticSearch {
+            fragment all {
                 offset,
                 limit
-            },
-            KeywordSearch {
+            }
+            fragment keyword {
                 Some(query)
+            }
+            struct KeywordSearch {
+                ..all,
+                ..keyword,
+                custom_field
             }
         };
         
         let view_spec: ViewSpec = syn::parse2(input).unwrap();
+        let keyword_struct = &view_spec.view_structs[0];
         
-        let keyword_fields = get_fields_for_view(&view_spec.field_groups, "KeywordSearch");
-        assert_eq!(keyword_fields.len(), 3); // offset, limit, query
-        
-        let semantic_fields = get_fields_for_view(&view_spec.field_groups, "SemanticSearch");
-        assert_eq!(semantic_fields.len(), 2); // offset, limit
+        let resolved = resolve_view_fields(keyword_struct, &view_spec.fragments).unwrap();
+        assert_eq!(resolved.len(), 4); // offset, limit, query, custom_field
     }
 }
