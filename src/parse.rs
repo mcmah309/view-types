@@ -5,39 +5,37 @@ use syn::{
 };
 
 /// Top-level view specification with fragments and structs
-#[derive(Debug, Clone)]
-pub(crate) struct ViewSpec {
+#[derive(Debug)]
+pub(crate) struct Views {
     pub fragments: Vec<Fragment>,
     pub view_structs: Vec<ViewStruct>,
 }
 
-/// A reusable fragment of fields
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct Fragment {
     pub name: Ident,
-    pub fields: Vec<FieldSpec>,
+    pub fields: Vec<FieldItem>,
 }
 
-/// A view struct definition
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct ViewStruct {
     pub name: Ident,
     pub generics: Option<syn::Generics>,
-    pub items: Vec<StructItem>,
+    pub items: Vec<ViewStructFieldKind>,
 }
 
-/// Items that can appear in a struct definition
-#[derive(Debug, Clone)]
-pub(crate) enum StructItem {
+/// Items that can appear in a view struct definition
+#[derive(Debug)]
+pub(crate) enum ViewStructFieldKind {
     /// Spread a fragment: `..fragment_name`
-    Spread(Ident),
+    FragmentSpread(Ident),
     /// Individual field: `field_name` or pattern
-    Field(FieldSpec),
+    Field(FieldItem),
 }
 
 /// Individual field specification with optional transformation
-#[derive(Debug, Clone)]
-pub(crate) struct FieldSpec {
+#[derive(Debug)]
+pub(crate) struct FieldItem {
     pub field_name: Ident,
     /// e.g. `std::option::Option::Some` in `std::option::Option::Some(field)`
     pub pattern_to_match: Option<syn::Path>,
@@ -45,18 +43,7 @@ pub(crate) struct FieldSpec {
     pub transformation: Option<Expr>,
 }
 
-/// Field transformation options
-#[derive(Debug, Clone)]
-pub(crate) enum FieldTransformation {
-    /// Simple assignment: `field = expr`
-    Assignment(Expr),
-    /// Function call: `field(args)`
-    FunctionCall(Expr),
-    /// No transformation, just include the field
-    None,
-}
-
-impl Parse for ViewSpec {
+impl Parse for Views {
     fn parse(input: ParseStream) -> Result<Self> {
         let mut fragments = Vec::new();
         let mut view_structs = Vec::new();
@@ -85,7 +72,7 @@ impl Parse for ViewSpec {
             }
         }
 
-        Ok(ViewSpec {
+        Ok(Views {
             fragments,
             view_structs,
         })
@@ -108,7 +95,7 @@ impl Parse for Fragment {
 
         let mut fields = Vec::new();
         while !content.is_empty() {
-            let field_spec = content.parse::<FieldSpec>()?;
+            let field_spec = content.parse::<FieldItem>()?;
             fields.push(field_spec);
 
             // Consume optional comma
@@ -142,11 +129,11 @@ impl Parse for ViewStruct {
                 // Spread syntax
                 content.parse::<Token![..]>()?;
                 let fragment_name: Ident = content.parse()?;
-                items.push(StructItem::Spread(fragment_name));
+                items.push(ViewStructFieldKind::FragmentSpread(fragment_name));
             } else {
                 // Individual field
-                let field_spec = content.parse::<FieldSpec>()?;
-                items.push(StructItem::Field(field_spec));
+                let field_spec = content.parse::<FieldItem>()?;
+                items.push(ViewStructFieldKind::Field(field_spec));
             }
 
             // Consume optional comma
@@ -163,7 +150,7 @@ impl Parse for ViewStruct {
     }
 }
 
-impl Parse for FieldSpec {
+impl Parse for FieldItem {
     fn parse(input: ParseStream) -> Result<Self> {
         let (field_name, pattern_to_match) = parse_field_pattern(input)?;
 
@@ -175,7 +162,7 @@ impl Parse for FieldSpec {
             None
         };
 
-        Ok(FieldSpec {
+        Ok(FieldItem {
             pattern_to_match,
             transformation,
             field_name,
@@ -216,7 +203,7 @@ mod tests {
     fn resolve_view_fields<'a>(
         view_struct: &'a ViewStruct,
         fragments: &'a [Fragment],
-    ) -> Result<Vec<&'a FieldSpec>> {
+    ) -> Result<Vec<&'a FieldItem>> {
         let fragment_map: HashMap<String, &Fragment> =
             fragments.iter().map(|f| (f.name.to_string(), f)).collect();
 
@@ -224,7 +211,7 @@ mod tests {
 
         for item in &view_struct.items {
             match item {
-                StructItem::Spread(fragment_name) => {
+                ViewStructFieldKind::FragmentSpread(fragment_name) => {
                     let fragment_name_str = fragment_name.to_string();
                     if let Some(fragment) = fragment_map.get(&fragment_name_str) {
                         resolved_fields.extend(&fragment.fields);
@@ -235,7 +222,7 @@ mod tests {
                         ));
                     }
                 }
-                StructItem::Field(field_spec) => {
+                ViewStructFieldKind::Field(field_spec) => {
                     resolved_fields.push(field_spec);
                 }
             }
@@ -245,7 +232,7 @@ mod tests {
     }
 
     /// Helper to determine if a field spec has a transformation
-    fn has_transformation(field_spec: &FieldSpec) -> bool {
+    fn has_transformation(field_spec: &FieldItem) -> bool {
         field_spec.transformation.is_some()
     }
 
@@ -279,7 +266,7 @@ mod tests {
         assert_eq!(view_struct.items.len(), 3);
 
         // Check spread items
-        if let StructItem::Spread(name) = &view_struct.items[0] {
+        if let ViewStructFieldKind::FragmentSpread(name) = &view_struct.items[0] {
             assert_eq!(name.to_string(), "all");
         } else {
             panic!("Expected spread item");
@@ -322,7 +309,7 @@ mod tests {
             }
         };
 
-        let view_spec: ViewSpec = syn::parse2(input).unwrap();
+        let view_spec: Views = syn::parse2(input).unwrap();
         assert_eq!(view_spec.fragments.len(), 2);
         assert_eq!(view_spec.view_structs.len(), 2);
     }
@@ -344,7 +331,7 @@ mod tests {
             }
         };
 
-        let view_spec: ViewSpec = syn::parse2(input).unwrap();
+        let view_spec: Views = syn::parse2(input).unwrap();
         let keyword_struct = &view_spec.view_structs[0];
 
         let resolved = resolve_view_fields(keyword_struct, &view_spec.fragments).unwrap();
