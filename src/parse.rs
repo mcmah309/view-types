@@ -1,7 +1,5 @@
 use syn::{
-    Expr, Ident, Token, braced, parenthesized,
-    parse::{Parse, ParseStream, Result},
-    token::Paren,
+    braced, parenthesized, parse::{Parse, ParseStream, Result}, token::Paren, Expr, Ident, Token, Visibility
 };
 
 /// Top-level view specification with fragments and structs
@@ -22,6 +20,8 @@ pub(crate) struct ViewStruct {
     pub name: Ident,
     pub generics: Option<syn::Generics>,
     pub items: Vec<ViewStructFieldKind>,
+    pub attributes: Vec<syn::Attribute>,
+    pub visibility: Option<Visibility>
 }
 
 /// Items that can appear in a view struct definition
@@ -39,7 +39,7 @@ pub(crate) struct FieldItem {
     pub field_name: Ident,
     /// e.g. `std::option::Option::Some` in `std::option::Option::Some(field)`
     pub pattern_to_match: Option<syn::Path>,
-    /// e.g. `transfrom(field)` in `Some(field) = transfrom(field)`
+    /// e.g. `transfrom(field)` in `field = transfrom(field)`
     pub transformation: Option<Expr>,
 }
 
@@ -64,7 +64,7 @@ impl Parse for Views {
                         "Expected 'fragment' or 'struct'",
                     ));
                 }
-            } else if lookahead.peek(Token![struct]) {
+            } else if lookahead.peek(Token![struct]) || lookahead.peek(Token![#]) || lookahead.peek(Token![pub]) {
                 let view_struct = input.parse::<ViewStruct>()?;
                 view_structs.push(view_struct);
             } else {
@@ -110,6 +110,8 @@ impl Parse for Fragment {
 
 impl Parse for ViewStruct {
     fn parse(input: ParseStream) -> Result<Self> {
+        let attributes = input.call(syn::Attribute::parse_outer)?;
+        let visibility = input.parse::<Visibility>().ok();
         input.parse::<Token![struct]>()?;
         let name: Ident = input.parse()?;
 
@@ -146,6 +148,8 @@ impl Parse for ViewStruct {
             name,
             generics,
             items,
+            attributes,
+            visibility
         })
     }
 }
@@ -196,8 +200,8 @@ fn parse_field_pattern(input: ParseStream) -> Result<(Ident, Option<syn::Path>)>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use syn::parse_quote;
     use std::collections::HashMap;
+    use syn::parse_quote;
 
     /// Helper function to get all fields for a view struct by resolving fragments
     fn resolve_view_fields<'a>(
@@ -336,7 +340,10 @@ mod tests {
 
         let resolved = resolve_view_fields(keyword_struct, &view_spec.fragments).unwrap();
         assert_eq!(resolved.len(), 4); // offset, limit, query, custom_field
-        let names = resolved.iter().map(|f| f.field_name.to_string()).collect::<Vec<_>>();
+        let names = resolved
+            .iter()
+            .map(|f| f.field_name.to_string())
+            .collect::<Vec<_>>();
         assert!(names.contains(&"offset".to_owned()));
         assert!(names.contains(&"limit".to_owned()));
         assert!(names.contains(&"query".to_owned()));

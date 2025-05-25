@@ -1,40 +1,56 @@
 use std::collections::{HashMap, HashSet};
-use syn::{Error, Expr, Field, Ident, ItemStruct};
+use syn::{Error, Expr, Field, Ident, ItemStruct, Visibility};
 
 use crate::parse::{ViewStructFieldKind, Views};
+
+pub(crate) struct Resolution<'a> {
+    pub view_structs: Vec<ResolvedViewStruct<'a>>,
+    // todo
+    // /// view structs that are subsets of other view structs, thus can be converted between
+    // sub_structs: HashMap<usize,usize>,
+}
+
+// /// Check if target view is a subset of source view
+// fn is_view_subset(target_view: &ResolvedViewStruct, source_view: &ResolvedViewStruct) -> bool {
+//     let source_field_names: HashSet<String> = source_view.resolved_fields
+//         .iter()
+//         .map(|f| f.source_view_field_name.to_string())
+//         .collect();
+    
+//     target_view.resolved_fields.iter().all(|target_field| {
+//         source_field_names.contains(&target_field.source_view_field_name.to_string())
+//     })
+// }
 
 #[derive(Debug)]
 pub(crate) struct ResolvedViewStruct<'a> {
     pub name: &'a Ident,
     pub generics: &'a Option<syn::Generics>,
     pub resolved_fields: Vec<ResolvedViewField<'a>>,
+    pub attributes: &'a Vec<syn::Attribute>,
+    pub visibility: &'a Option<Visibility>
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedViewField<'a> {
-    /// `..field_name` or `field_name`
-    pub source_view_field_name: &'a Ident,
-    /// The filed in the original struct.
-    /// If from a spread fragment, `field.ident` equals `source_view_field_name` otherwise it equals the entry
-    /// in the fragment
-    pub field: &'a Field,
-    /// e.g. `std::option::Option::Some` in `std::option::Option::Some(field)`
+    pub original_struct_field: &'a Field,
     pub pattern_to_match: &'a Option<syn::Path>,
-    /// e.g. `transfrom(field)` in `Some(field) = transfrom(field)`
     pub transformation: &'a Option<Expr>,
 }
 
 pub(crate) fn resolve<'a>(
     original_struct: &'a syn::ItemStruct,
     view_spec: &'a Views,
-) -> syn::Result<Vec<ResolvedViewStruct<'a>>> {
+) -> syn::Result<Resolution<'a>> {
     validate_original_struct(original_struct)?;
     validate_unique_fields(view_spec)?;
 
     let original_struct_fields = extract_original_fields(&original_struct)?;
 
     let resolved_view_structs = resolve_field_references(view_spec, &original_struct_fields)?;
-    Ok(resolved_view_structs)
+    Ok(Resolution {
+        view_structs: resolved_view_structs,
+    })
 }
 
 /// Validate that the original struct is suitable for view generation
@@ -43,11 +59,11 @@ fn validate_original_struct(original_struct: &ItemStruct) -> syn::Result<()> {
         syn::Fields::Named(_) => Ok(()),
         syn::Fields::Unnamed(_) => Err(syn::Error::new_spanned(
             original_struct,
-            "Views macro only supports structs with named fields (not tuple structs)"
+            "Views macro only supports structs with named fields (not tuple structs)",
         )),
         syn::Fields::Unit => Err(syn::Error::new_spanned(
             original_struct,
-            "Views macro only supports structs with named fields (not unit structs)"
+            "Views macro only supports structs with named fields (not unit structs)",
         )),
     }
 }
@@ -165,8 +181,7 @@ fn resolve_field_references<'a, 'b>(
             let fragment_field_name = fragment_field_item.field_name.to_string();
             if let Some(original_field) = original_fields.get(&fragment_field_name) {
                 resolved_fragment_fields.push(ResolvedViewField {
-                    source_view_field_name: &fragment_field_item.field_name,
-                    field: original_field,
+                    original_struct_field: original_field,
                     pattern_to_match: &fragment_field_item.pattern_to_match,
                     transformation: &fragment_field_item.transformation,
                 });
@@ -206,8 +221,7 @@ fn resolve_field_references<'a, 'b>(
                     let field_name = field_item.field_name.to_string();
                     if let Some(original_field) = original_fields.get(&field_name) {
                         resolved_fields.push(ResolvedViewField {
-                            source_view_field_name: &field_item.field_name,
-                            field: original_field,
+                            original_struct_field: original_field,
                             pattern_to_match: &field_item.pattern_to_match,
                             transformation: &field_item.transformation,
                         });
@@ -224,6 +238,8 @@ fn resolve_field_references<'a, 'b>(
             name: &view_struct.name,
             generics: &view_struct.generics,
             resolved_fields,
+            attributes: &view_struct.attributes,
+            visibility: &view_struct.visibility,
         })
     }
 
