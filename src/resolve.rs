@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use syn::{Error, Expr, Field, Ident};
+use syn::{Error, Expr, Field, Ident, ItemStruct};
 
 use crate::parse::{ViewStructFieldKind, Views};
 
@@ -28,12 +28,28 @@ pub(crate) fn resolve<'a>(
     original_struct: &'a syn::ItemStruct,
     view_spec: &'a Views,
 ) -> syn::Result<Vec<ResolvedViewStruct<'a>>> {
+    validate_original_struct(original_struct)?;
     validate_unique_fields(view_spec)?;
 
     let original_struct_fields = extract_original_fields(&original_struct)?;
 
     let resolved_view_structs = resolve_field_references(view_spec, &original_struct_fields)?;
     Ok(resolved_view_structs)
+}
+
+/// Validate that the original struct is suitable for view generation
+fn validate_original_struct(original_struct: &ItemStruct) -> syn::Result<()> {
+    match &original_struct.fields {
+        syn::Fields::Named(_) => Ok(()),
+        syn::Fields::Unnamed(_) => Err(syn::Error::new_spanned(
+            original_struct,
+            "Views macro only supports structs with named fields (not tuple structs)"
+        )),
+        syn::Fields::Unit => Err(syn::Error::new_spanned(
+            original_struct,
+            "Views macro only supports structs with named fields (not unit structs)"
+        )),
+    }
 }
 
 fn validate_unique_fields(view_spec: &Views) -> syn::Result<()> {
