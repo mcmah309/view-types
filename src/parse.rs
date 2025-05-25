@@ -1,30 +1,30 @@
 use proc_macro2::{Span, TokenStream as TokenStream2};
-use quote::{quote, format_ident};
+use quote::{format_ident, quote};
+use std::collections::HashMap;
 use syn::{
+    Expr, Ident, Pat, Token, Type, braced, parenthesized,
     parse::{Parse, ParseStream, Result},
     punctuated::Punctuated,
     token::{Brace, Paren},
-    Expr, Ident, Pat, Token, Type, braced, parenthesized,
 };
-use std::collections::HashMap;
 
 /// Top-level view specification with fragments and structs
 #[derive(Debug, Clone)]
-pub struct ViewSpec {
+pub(crate) struct ViewSpec {
     pub fragments: Vec<Fragment>,
     pub view_structs: Vec<ViewStruct>,
 }
 
 /// A reusable fragment of fields
 #[derive(Debug, Clone)]
-pub struct Fragment {
+pub(crate) struct Fragment {
     pub name: Ident,
     pub fields: Vec<FieldSpec>,
 }
 
 /// A view struct definition
 #[derive(Debug, Clone)]
-pub struct ViewStruct {
+pub(crate) struct ViewStruct {
     pub name: Ident,
     pub generics: Option<syn::Generics>,
     pub items: Vec<StructItem>,
@@ -32,7 +32,7 @@ pub struct ViewStruct {
 
 /// Items that can appear in a struct definition
 #[derive(Debug, Clone)]
-pub enum StructItem {
+pub(crate) enum StructItem {
     /// Spread a fragment: `..fragment_name`
     Spread(Ident),
     /// Individual field: `field_name` or pattern
@@ -41,15 +41,15 @@ pub enum StructItem {
 
 /// Individual field specification with optional transformation
 #[derive(Debug, Clone)]
-pub struct FieldSpec {
-    pub pattern: Pat,
+pub(crate) struct FieldSpec {
+    pub field_name: Ident,
+    pub pattern_to_match: Option<syn::Path>,
     pub transformation: Option<FieldTransformation>,
-    pub field_name: Option<Ident>, // extracted from pattern if simple
 }
 
 /// Field transformation options
 #[derive(Debug, Clone)]
-pub enum FieldTransformation {
+pub(crate) enum FieldTransformation {
     /// Simple assignment: `field = expr`
     Assignment(Expr),
     /// Function call: `field(args)`
@@ -69,12 +69,15 @@ impl Parse for ViewSpec {
                 // Check if it's "fragment"
                 let fork = input.fork();
                 let ident: Ident = fork.parse()?;
-                
+
                 if ident == "fragment" {
                     let fragment = input.parse::<Fragment>()?;
                     fragments.push(fragment);
                 } else {
-                    return Err(syn::Error::new(ident.span(), "Expected 'fragment' or 'struct'"));
+                    return Err(syn::Error::new(
+                        ident.span(),
+                        "Expected 'fragment' or 'struct'",
+                    ));
                 }
             } else if lookahead.peek(Token![struct]) {
                 let view_struct = input.parse::<ViewStruct>()?;
@@ -97,7 +100,7 @@ impl Parse for Fragment {
         if fragment_keyword != "fragment" {
             return Err(syn::Error::new(
                 fragment_keyword.span(),
-                "Expected 'fragment'"
+                "Expected 'fragment'",
             ));
         }
         let name: Ident = input.parse()?;
@@ -164,11 +167,7 @@ impl Parse for ViewStruct {
 
 impl Parse for FieldSpec {
     fn parse(input: ParseStream) -> Result<Self> {
-        // Parse the pattern manually since Pat doesn't implement Parse directly
-        let pattern = parse_field_pattern(input)?;
-        
-        // Extract field name if it's a simple identifier
-        let field_name = extract_field_name_from_pattern(&pattern);
+        let (field_name, pattern_to_match) = parse_field_pattern(input)?;
 
         // Check for transformation
         let transformation = if input.peek(Token![=]) {
@@ -180,7 +179,7 @@ impl Parse for FieldSpec {
         };
 
         Ok(FieldSpec {
-            pattern,
+            pattern_to_match,
             transformation,
             field_name,
         })
@@ -188,264 +187,197 @@ impl Parse for FieldSpec {
 }
 
 /// Parse a field pattern manually
-fn parse_field_pattern(input: ParseStream) -> Result<Pat> {
-    // Parse a general pattern - this handles most common cases
-    if input.peek(Ident) {
-        // Could be a simple ident or start of a path/tuple struct pattern
-        let lookahead = input.lookahead1();
-        
-        if lookahead.peek(Ident) && input.peek2(Token![::]) {
-            // Path pattern like EnumType::Branch(value) or std::option::Option::Some(x)
-            parse_path_pattern(input)
-        } else if lookahead.peek(Ident) && input.peek2(Paren) {
-            // Tuple struct pattern like Some(field) or MyStruct(x, y)
-            parse_tuple_struct_pattern(input)
-        } else if lookahead.peek(Ident) {
-            // Simple identifier pattern
-            let ident: Ident = input.parse()?;
-            Ok(Pat::Ident(syn::PatIdent {
-                attrs: vec![],
-                by_ref: None,
-                mutability: None,
-                ident,
-                subpat: None,
-            }))
+fn parse_field_pattern(input: ParseStream) -> Result<(Ident, Option<syn::Path>)> {
+    // Could be a simple ident or start of a path/tuple struct pattern
+    let lookahead = input.lookahead1();
+    if lookahead.peek(Ident) && (input.peek2(Paren) || input.peek2(Token![::])) {
+        // Pattern like Some(field) or std::option::Option::Some(field)
+        let pattern_to_match = input.parse::<syn::Path>()?;
+        if input.peek(Paren) {
+            let content;
+            parenthesized!(content in input);
+            let field = content.parse::<Ident>()?;
+            Ok((field, Some(pattern_to_match)))
         } else {
-            Err(lookahead.error())
+            Err(syn::Error::new(
+                input.span(),
+                "Expected parentheses containing field to match on",
+            ))
         }
     } else {
-        Err(syn::Error::new(input.span(), "Expected field pattern"))
-    }
-}
-
-/// Parse a path-based pattern like EnumType::Branch(value)
-fn parse_path_pattern(input: ParseStream) -> Result<Pat> {
-    let mut segments = Punctuated::new();
-    
-    // Parse the path segments
-    loop {
+        // Simple identifier pattern
         let ident: Ident = input.parse()?;
-        segments.push(syn::PathSegment {
-            ident,
-            arguments: syn::PathArguments::None,
-        });
-        
-        if input.peek(Token![::]) {
-            input.parse::<Token![::]>()?;
-        } else {
-            break;
-        }
-    }
-    
-    let path = syn::Path {
-        leading_colon: None,
-        segments,
-    };
-    
-    // Check if this is followed by parentheses (tuple struct pattern)
-    if input.peek(Paren) {
-        let content;
-        parenthesized!(content in input);
-        
-        let mut elems = Punctuated::new();
-        while !content.is_empty() {
-            let inner_pattern = parse_inner_pattern(&content)?;
-            elems.push(inner_pattern);
-            
-            if content.peek(Token![,]) {
-                content.parse::<Token![,]>()?;
-            } else {
-                break;
-            }
-        }
-        
-        Ok(Pat::TupleStruct(syn::PatTupleStruct {
-            attrs: vec![],
-            qself: None,
-            path,
-            paren_token: syn::token::Paren::default(),
-            elems,
-        }))
-    } else {
-        // Just a path pattern
-        Ok(Pat::Path(syn::PatPath {
-            attrs: vec![],
-            qself: None,
-            path,
-        }))
+        Ok((ident, None))
     }
 }
 
-/// Parse a simple tuple struct pattern like Some(field)
-fn parse_tuple_struct_pattern(input: ParseStream) -> Result<Pat> {
-    let ident: Ident = input.parse()?;
-    let path = syn::Path::from(ident);
-    
-    let content;
-    parenthesized!(content in input);
-    
-    let mut elems = Punctuated::new();
-    while !content.is_empty() {
-        let inner_pattern = parse_inner_pattern(&content)?;
-        elems.push(inner_pattern);
-        
-        if content.peek(Token![,]) {
-            content.parse::<Token![,]>()?;
-        } else {
-            break;
-        }
-    }
-    
-    Ok(Pat::TupleStruct(syn::PatTupleStruct {
-        attrs: vec![],
-        qself: None,
-        path,
-        paren_token: syn::token::Paren::default(),
-        elems,
-    }))
-}
+// /// Parse a path-based pattern like EnumType::Branch(value)
+// fn parse_path_pattern(input: ParseStream) -> Result<Pat> {
+//     let path = input.parse::<syn::Path>()?;
 
-/// Parse inner patterns within parentheses
-fn parse_inner_pattern(input: ParseStream) -> Result<Pat> {
-    if input.peek(Ident) {
-        let ident: Ident = input.parse()?;
-        Ok(Pat::Ident(syn::PatIdent {
-            attrs: vec![],
-            by_ref: None,
-            mutability: None,
-            ident,
-            subpat: None,
-        }))
-    } else if input.peek(Token![_]) {
-        input.parse::<Token![_]>()?;
-        Ok(Pat::Wild(syn::PatWild {
-            attrs: vec![],
-            underscore_token: Token![_](Span::call_site()),
-        }))
-    } else {
-        Err(syn::Error::new(input.span(), "Expected identifier or wildcard pattern"))
-    }
-}
+//     // Check if this is followed by parentheses (tuple struct pattern)
+//     if input.peek(Paren) {
+//         let content;
+//         parenthesized!(content in input);
 
-/// Extract a simple field name from a pattern if possible
-fn extract_field_name_from_pattern(pattern: &Pat) -> Option<Ident> {
-    match pattern {
-        // Simple identifier: `field_name`
-        Pat::Ident(pat_ident) => Some(pat_ident.ident.clone()),
-        
-        // Tuple struct pattern: `Some(field_name)` or `EnumType::Branch(field_name)`
-        Pat::TupleStruct(pat_tuple_struct) => {
-            if pat_tuple_struct.elems.len() == 1 {
-                if let Pat::Ident(pat_ident) = &pat_tuple_struct.elems[0] {
-                    return Some(pat_ident.ident.clone());
-                }
-            }
-            None
-        }
-        
-        // Path pattern: `EnumType::Branch`
-        Pat::Path(pat_path) => {
-            pat_path.path.get_ident().cloned()
-        }
-        
-        _ => None,
-    }
-}
+//         let field = content.parse::<Ident>()?;
 
-/// Helper function to get all fields for a view struct by resolving fragments
-pub fn resolve_view_fields<'a>(
-    view_struct: &'a ViewStruct, 
-    fragments: &'a [Fragment]
-) -> Result<Vec<&'a FieldSpec>> {
-    let fragment_map: HashMap<String, &Fragment> = fragments
-        .iter()
-        .map(|f| (f.name.to_string(), f))
-        .collect();
+//         Ok(Pat::TupleStruct(syn::PatTupleStruct {
+//             attrs: vec![],
+//             qself: None,
+//             path,
+//             paren_token: syn::token::Paren::default(),
+//             elems,
+//         }))
+//     } else {
+//         // Just a path pattern
+//         Ok(Pat::Path(syn::PatPath {
+//             attrs: vec![],
+//             qself: None,
+//             path,
+//         }))
+//     }
+// }
 
-    let mut resolved_fields = Vec::new();
+// /// Parse a simple tuple struct pattern like Some(field)
+// fn parse_tuple_struct_pattern(input: ParseStream) -> Result<Pat> {
+//     let ident: Ident = input.parse()?;
+//     let path = syn::Path::from(ident);
 
-    for item in &view_struct.items {
-        match item {
-            StructItem::Spread(fragment_name) => {
-                let fragment_name_str = fragment_name.to_string();
-                if let Some(fragment) = fragment_map.get(&fragment_name_str) {
-                    resolved_fields.extend(&fragment.fields);
-                } else {
-                    return Err(syn::Error::new(
-                        fragment_name.span(),
-                        format!("Fragment '{}' not found", fragment_name_str)
-                    ));
-                }
-            }
-            StructItem::Field(field_spec) => {
-                resolved_fields.push(field_spec);
-            }
-        }
-    }
+//     let content;
+//     parenthesized!(content in input);
 
-    Ok(resolved_fields)
-}
+//     let mut elems = Punctuated::new();
+//     while !content.is_empty() {
+//         let inner_pattern = parse_inner_pattern(&content)?;
+//         elems.push(inner_pattern);
 
-/// Helper function to check if a pattern represents an unwrapping operation
-pub fn is_unwrap_pattern(pattern: &Pat) -> bool {
-    match pattern {
-        Pat::TupleStruct(pat_tuple_struct) => {
-            // Check if this is any tuple struct pattern with arguments
-            !pat_tuple_struct.elems.is_empty()
-        }
-        _ => false,
-    }
-}
+//         if content.peek(Token![,]) {
+//             content.parse::<Token![,]>()?;
+//         } else {
+//             break;
+//         }
+//     }
 
-/// Helper function to get the inner pattern from an unwrap pattern
-pub fn get_inner_pattern_from_unwrap(pattern: &Pat) -> Option<&Pat> {
-    match pattern {
-        Pat::TupleStruct(pat_tuple_struct) => {
-            if pat_tuple_struct.elems.len() == 1 {
-                Some(&pat_tuple_struct.elems[0])
-            } else {
-                None
-            }
-        }
-        _ => None,
-    }
-}
+//     Ok(Pat::TupleStruct(syn::PatTupleStruct {
+//         attrs: vec![],
+//         qself: None,
+//         path,
+//         paren_token: syn::token::Paren::default(),
+//         elems,
+//     }))
+// }
 
-/// Helper function to check if this is a specific pattern type (e.g., "Some")
-pub fn is_pattern_type(pattern: &Pat, pattern_name: &str) -> bool {
-    match pattern {
-        Pat::TupleStruct(pat_tuple_struct) => {
-            if let Some(last_segment) = pat_tuple_struct.path.segments.last() {
-                last_segment.ident == pattern_name
-            } else {
-                false
-            }
-        }
-        Pat::Path(pat_path) => {
-            if let Some(ident) = pat_path.path.get_ident() {
-                ident == pattern_name
-            } else {
-                false
-            }
-        }
-        _ => false,
-    }
-}
+// /// Extract a simple field name from a pattern if possible
+// fn extract_field_name_from_pattern(pattern: &Pat) -> Option<Ident> {
+//     match pattern {
+//         // Simple identifier: `field_name`
+//         Pat::Ident(pat_ident) => Some(pat_ident.ident.clone()),
 
-/// Helper to determine if a field spec has a transformation
-pub fn has_transformation(field_spec: &FieldSpec) -> bool {
-    field_spec.transformation.is_some()
-}
+//         // Tuple struct pattern: `Some(field_name)` or `EnumType::Branch(field_name)`
+//         Pat::TupleStruct(pat_tuple_struct) => {
+//             if pat_tuple_struct.elems.len() == 1 {
+//                 if let Pat::Ident(pat_ident) = &pat_tuple_struct.elems[0] {
+//                     return Some(pat_ident.ident.clone());
+//                 }
+//             }
+//             None
+//         }
 
-/// Helper to get the target field name (either from pattern or explicit)
-pub fn get_target_field_name(field_spec: &FieldSpec) -> Option<&Ident> {
-    field_spec.field_name.as_ref()
-}
+//         // Path pattern: `EnumType::Branch`
+//         Pat::Path(pat_path) => pat_path.path.get_ident().cloned(),
+
+//         _ => None,
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use syn::parse_quote;
+
+    /// Helper function to get all fields for a view struct by resolving fragments
+    fn resolve_view_fields<'a>(
+        view_struct: &'a ViewStruct,
+        fragments: &'a [Fragment],
+    ) -> Result<Vec<&'a FieldSpec>> {
+        let fragment_map: HashMap<String, &Fragment> =
+            fragments.iter().map(|f| (f.name.to_string(), f)).collect();
+
+        let mut resolved_fields = Vec::new();
+
+        for item in &view_struct.items {
+            match item {
+                StructItem::Spread(fragment_name) => {
+                    let fragment_name_str = fragment_name.to_string();
+                    if let Some(fragment) = fragment_map.get(&fragment_name_str) {
+                        resolved_fields.extend(&fragment.fields);
+                    } else {
+                        return Err(syn::Error::new(
+                            fragment_name.span(),
+                            format!("Fragment '{}' not found", fragment_name_str),
+                        ));
+                    }
+                }
+                StructItem::Field(field_spec) => {
+                    resolved_fields.push(field_spec);
+                }
+            }
+        }
+
+        Ok(resolved_fields)
+    }
+
+    /// Helper function to check if a pattern represents an unwrapping operation
+    fn is_unwrap_pattern(pattern: &Pat) -> bool {
+        match pattern {
+            Pat::TupleStruct(pat_tuple_struct) => {
+                // Check if this is any tuple struct pattern with arguments
+                !pat_tuple_struct.elems.is_empty()
+            }
+            _ => false,
+        }
+    }
+
+    /// Helper function to get the inner pattern from an unwrap pattern
+    fn get_inner_pattern_from_unwrap(pattern: &Pat) -> Option<&Pat> {
+        match pattern {
+            Pat::TupleStruct(pat_tuple_struct) => {
+                if pat_tuple_struct.elems.len() == 1 {
+                    Some(&pat_tuple_struct.elems[0])
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Helper function to check if this is a specific pattern type (e.g., "Some")
+    fn is_pattern_type(pattern: &Pat, pattern_name: &str) -> bool {
+        match pattern {
+            Pat::TupleStruct(pat_tuple_struct) => {
+                if let Some(last_segment) = pat_tuple_struct.path.segments.last() {
+                    last_segment.ident == pattern_name
+                } else {
+                    false
+                }
+            }
+            Pat::Path(pat_path) => {
+                if let Some(ident) = pat_path.path.get_ident() {
+                    ident == pattern_name
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
+    /// Helper to determine if a field spec has a transformation
+    fn has_transformation(field_spec: &FieldSpec) -> bool {
+        field_spec.transformation.is_some()
+    }
 
     #[test]
     fn test_parse_fragment() {
@@ -455,7 +387,7 @@ mod tests {
                 limit
             }
         };
-        
+
         let fragment: Fragment = syn::parse2(input).unwrap();
         assert_eq!(fragment.name.to_string(), "all");
         assert_eq!(fragment.fields.len(), 2);
@@ -470,12 +402,12 @@ mod tests {
                 custom_field
             }
         };
-        
+
         let view_struct: ViewStruct = syn::parse2(input).unwrap();
         assert_eq!(view_struct.name.to_string(), "KeywordSearch");
         assert!(view_struct.generics.is_some());
         assert_eq!(view_struct.items.len(), 3);
-        
+
         // Check spread items
         if let StructItem::Spread(name) = &view_struct.items[0] {
             assert_eq!(name.to_string(), "all");
@@ -492,7 +424,7 @@ mod tests {
                 Some(query)
             }
         };
-        
+
         let fragment: Fragment = syn::parse2(input).unwrap();
         assert_eq!(fragment.fields.len(), 2);
         assert!(has_transformation(&fragment.fields[0]));
@@ -519,7 +451,7 @@ mod tests {
                 semantic_field
             }
         };
-        
+
         let view_spec: ViewSpec = syn::parse2(input).unwrap();
         assert_eq!(view_spec.fragments.len(), 2);
         assert_eq!(view_spec.view_structs.len(), 2);
@@ -541,10 +473,10 @@ mod tests {
                 custom_field
             }
         };
-        
+
         let view_spec: ViewSpec = syn::parse2(input).unwrap();
         let keyword_struct = &view_spec.view_structs[0];
-        
+
         let resolved = resolve_view_fields(keyword_struct, &view_spec.fragments).unwrap();
         assert_eq!(resolved.len(), 4); // offset, limit, query, custom_field
     }
