@@ -176,7 +176,7 @@ fn resolve_field_references<'a, 'b>(
         let mut binding = resolved_fragments
             .entry(fragment_name)
             .insert_entry(Vec::new());
-        let mut resolved_fragment_fields = binding.get_mut();
+        let resolved_fragment_fields = binding.get_mut();
         for fragment_field_item in &fragment.fields {
             let fragment_field_name = fragment_field_item.field_name.to_string();
             if let Some(original_field) = original_fields.get(&fragment_field_name) {
@@ -234,6 +234,7 @@ fn resolve_field_references<'a, 'b>(
                 }
             };
         }
+
         resolved_view_structs.push(ResolvedViewStruct {
             name: &view_struct.name,
             generics: &view_struct.generics,

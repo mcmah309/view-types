@@ -11,12 +11,10 @@ pub(crate) fn expand<'a>(
 
     for resolved_view in &resolution.view_structs {
         let view_struct = generate_view_struct(resolved_view)?;
-        let ref_struct = generate_ref_view_struct(resolved_view)?;
-        let mut_struct = generate_mut_view_struct(resolved_view)?;
+        let ref_structs = generate_ref_view_structs_and_methods(resolved_view)?;
 
         generated_code.push(view_struct);
-        generated_code.push(ref_struct);
-        generated_code.push(mut_struct);
+        generated_code.push(ref_structs);
     }
 
     let conversion_impl = generate_original_conversion_methods(original_struct, &resolution)?;
@@ -53,8 +51,37 @@ fn generate_view_struct(
             ty,
         } = resolved_field.original_struct_field;
 
+        let correct_type = if resolved_field.pattern_to_match.is_some() {
+            let error = || {
+                Err(syn::Error::new_spanned(
+                    // todo: how to handle this for regular deconstruction since we don't know the type to use?
+                    ty,
+                    "Pattern deconstructing is only implemented for single generic types. Otherwise the type being mapped to is ambagious.",
+                ))
+            };
+            match ty {
+                syn::Type::Path(ty) => {
+                    let arguments = &ty.path.segments.last().unwrap().arguments;
+                    match arguments {
+                        syn::PathArguments::AngleBracketed(generic_arguments) => {
+                            let mut args = generic_arguments.args.iter();
+                            let inner_type = args.next().unwrap();
+                            if args.len() != 0 {
+                                return error();
+                            }
+                            quote! { #inner_type}
+                        }
+                        _ => return error(),
+                    }
+                }
+                _ => return error(),
+            }
+        } else {
+            quote! {#ty}
+        };
+
         struct_fields.push(quote! {
-            #vis #ident: #ty
+            #vis #ident: #correct_type
         });
     }
 
@@ -72,8 +99,8 @@ fn generate_view_struct(
     })
 }
 
-/// Generate a reference struct (ViewRef)
-fn generate_ref_view_struct(
+/// Generate a reference and mutable reference structs
+fn generate_ref_view_structs_and_methods(
     resolved_view: &ResolvedViewStruct,
 ) -> syn::Result<proc_macro2::TokenStream> {
     let ResolvedViewStruct {
@@ -84,12 +111,13 @@ fn generate_ref_view_struct(
         visibility,
     } = resolved_view;
 
-    let ref_struct_name = format_ident!("{}Ref", name);
+    // todo check this lifetime does not exist
+    let all_owned_fields_additional_immutable_ref = quote! { &'original_struct };
+    let all_owned_fields_additional_mutable_ref = quote! { &'original_struct mut};
+    let mut uses_additional_lifetime = false;
 
-    let all_owned_fields_additional_ref = quote! { &'original_struct }; // todo check this lifetime does not exist
-    let mut uses_all_owned_fields_additional_ref = false;
-
-    let mut struct_fields = Vec::new();
+    let mut immutable_struct_fields = Vec::new();
+    let mut mutable_struct_fields = Vec::new();
     for resolved_field in resolved_fields {
         let Field {
             attrs: _, // todo get any attributes from the view struct/fragment fields (we don't want to use the original which is this)
@@ -100,22 +128,28 @@ fn generate_ref_view_struct(
             ty,
         } = resolved_field.original_struct_field;
 
-        let additional_ref = match ty {
-            syn::Type::Reference(_) => None,
+        let (additional_immutable_ref, additional_mutable_ref) = match ty {
+            syn::Type::Reference(_) => (None, None),
             _ => {
-                uses_all_owned_fields_additional_ref = true;
-                Some(all_owned_fields_additional_ref.clone())
+                uses_additional_lifetime = true;
+                (
+                    Some(all_owned_fields_additional_immutable_ref.clone()),
+                    Some(all_owned_fields_additional_mutable_ref.clone()),
+                )
             }
         };
 
-        struct_fields.push(quote! {
-            #vis #ident : #additional_ref #ty
+        immutable_struct_fields.push(quote! {
+            #vis #ident : #additional_immutable_ref #ty
+        });
+        mutable_struct_fields.push(quote! {
+            #vis #ident : #additional_mutable_ref #ty
         });
     }
 
     // Add lifetime parameter if does not already exist and needed
     let struct_lifetime_generics: Option<proc_macro2::TokenStream>;
-    if uses_all_owned_fields_additional_ref {
+    if uses_additional_lifetime {
         if let Some(generics) = generics {
             let mut new_generics = generics.clone();
             new_generics
@@ -128,86 +162,23 @@ fn generate_ref_view_struct(
     } else {
         if let Some(generics) = generics {
             struct_lifetime_generics = Some(quote! { #generics });
-        }
-        else {
+        } else {
             struct_lifetime_generics = None;
         }
     }
+
+    let ref_struct_name = format_ident!("{}Ref", name);
+    let mut_struct_name = format_ident!("{}Mut", name);
 
     Ok(quote! {
         #(#attributes)*
         #visibility struct #ref_struct_name #struct_lifetime_generics {
-            #(#struct_fields,)*
+            #(#immutable_struct_fields,)*
         }
-    })
-}
 
-/// Generate a mutable reference struct (ViewMut)
-fn generate_mut_view_struct(
-    resolved_view: &ResolvedViewStruct,
-) -> syn::Result<proc_macro2::TokenStream> {
-    let ResolvedViewStruct {
-        name,
-        generics,
-        resolved_fields,
-        attributes,
-        visibility,
-    } = resolved_view;
-
-    let mut_struct_name = format_ident!("{}Mut", name);
-
-        let all_owned_fields_additional_ref = quote! { &'original_struct mut }; // todo check this lifetime does not exist
-    let mut uses_all_owned_fields_additional_ref = false;
-
-    let mut struct_fields = Vec::new();
-    for resolved_field in resolved_fields {
-        let Field {
-            attrs: _, // todo get any attributes from the view struct/fragment fields (we don't want to use the original which is this)
-            vis,
-            mutability: _,
-            ident,
-            colon_token: _,
-            ty,
-        } = resolved_field.original_struct_field;
-
-        let additional_ref = match ty {
-            syn::Type::Reference(_) => None,
-            _ => {
-                uses_all_owned_fields_additional_ref = true;
-                Some(all_owned_fields_additional_ref.clone())
-            }
-        };
-
-        struct_fields.push(quote! {
-            #vis #ident : #additional_ref #ty
-        });
-    }
-
-    // Add lifetime parameter if does not already exist and needed
-    let struct_lifetime_generics: Option<proc_macro2::TokenStream>;
-    if uses_all_owned_fields_additional_ref {
-        if let Some(generics) = generics {
-            let mut new_generics = generics.clone();
-            new_generics
-                .params
-                .insert(0, syn::parse_quote!('original_struct));
-            struct_lifetime_generics = Some(quote! { #new_generics });
-        } else {
-            struct_lifetime_generics = Some(quote! { <'original_struct> });
-        };
-    } else {
-        if let Some(generics) = generics {
-            struct_lifetime_generics = Some(quote! { #generics });
-        }
-        else {
-            struct_lifetime_generics = None;
-        }
-    }
-
-    Ok(quote! {
         #(#attributes)*
         #visibility struct #mut_struct_name #struct_lifetime_generics {
-            #(#struct_fields,)*
+            #(#mutable_struct_fields,)*
         }
     })
 }

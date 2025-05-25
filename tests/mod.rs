@@ -1,7 +1,9 @@
+use std::borrow::Borrow;
+
 use view_type::views;
 
-fn valid_ratio(ratio: Option<f32>) -> Option<f32> {
-    ratio.filter(|&r| r >= 0.0 && r <= 1.0)
+fn validate_ratio(ratio: impl Borrow<Option<f32>>) -> Option<f32> {
+    ratio.borrow().filter(|&r| r >= 0.0 && r <= 1.0)
 }
 
 
