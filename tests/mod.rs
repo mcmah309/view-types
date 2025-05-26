@@ -1,9 +1,7 @@
-use std::borrow::Borrow;
-
 use view_type::views;
 
-fn validate_ratio(ratio: impl Borrow<Option<f32>>) -> Option<f32> {
-    ratio.borrow().filter(|&r| r >= 0.0 && r <= 1.0)
+fn validate_ratio(ratio: &f32) -> bool {
+    *ratio >= 0.0 && *ratio <= 1.0
 }
 
 
@@ -31,8 +29,7 @@ fn validate_ratio(ratio: impl Borrow<Option<f32>>) -> Option<f32> {
         ..all,
         ..keyword,
         ..semantic,
-        // Some(ratio) = validate_ratio(ratio)
-        Some(ratio)
+        Some(ratio) if validate_ratio(ratio)
     }
 )]
 pub struct Search<'a> {

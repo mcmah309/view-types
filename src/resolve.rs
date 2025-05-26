@@ -93,14 +93,14 @@ pub(crate) struct BuilderViewField<'a> {
     pub original_struct_field: &'a Field,
     pub this_struct_field_type: &'a syn::Type,
     pub pattern_to_match: &'a Option<syn::Path>,
-    pub transformation: &'a Option<Expr>,
+    pub validation: &'a Option<Expr>,
 }
 
 impl<'a> BuilderViewField<'a> {
     pub fn new(
         original_struct_field: &'a Field,
         pattern_to_match: &'a Option<syn::Path>,
-        transformation: &'a Option<Expr>,
+        validation: &'a Option<Expr>,
     ) -> syn::Result<BuilderViewField<'a>> {
         let this_struct_field_type = if pattern_to_match.is_some() {
             get_inner_type_for_pattern_match(&original_struct_field.ty)?
@@ -111,7 +111,7 @@ impl<'a> BuilderViewField<'a> {
             original_struct_field,
             this_struct_field_type,
             pattern_to_match,
-            transformation,
+            validation,
         })
     }
 }
@@ -262,7 +262,7 @@ fn resolve_field_references<'a, 'b>(
                 builder_fragment_fields.push(BuilderViewField::new(
                     original_field,
                     &fragment_field_item.pattern_to_match,
-                    &fragment_field_item.transformation,
+                    &fragment_field_item.validation,
                 )?);
             } else {
                 return Err(Error::new(
@@ -302,7 +302,7 @@ fn resolve_field_references<'a, 'b>(
                         builder_fields.push(BuilderViewField::new(
                             original_field,
                             &field_item.pattern_to_match,
-                            &field_item.transformation,
+                            &field_item.validation,
                         )?);
                     } else {
                         return Err(Error::new(

@@ -33,14 +33,14 @@ pub(crate) enum ViewStructFieldKind {
     Field(FieldItem),
 }
 
-/// Individual field specification with optional transformation
+/// Individual field specification with optional validation
 #[derive(Debug)]
 pub(crate) struct FieldItem {
     pub field_name: Ident,
     /// e.g. `std::option::Option::Some` in `std::option::Option::Some(field)`
     pub pattern_to_match: Option<syn::Path>,
-    /// e.g. `transfrom(field)` in `field = transfrom(field)`
-    pub transformation: Option<Expr>,
+    /// e.g. `validate(field)` in `field if validate(field)`
+    pub validation: Option<Expr>,
 }
 
 impl Parse for Views {
@@ -158,17 +158,17 @@ impl Parse for FieldItem {
     fn parse(input: ParseStream) -> Result<Self> {
         let (field_name, pattern_to_match) = parse_field_pattern(input)?;
 
-        let transformation = if input.peek(Token![=]) {
-            input.parse::<Token![=]>()?;
-            let transformation: Expr = input.parse()?;
-            Some(transformation)
+        let validation = if input.peek(Token![if]) {
+            input.parse::<Token![if]>()?;
+            let validation: Expr = input.parse()?;
+            Some(validation)
         } else {
             None
         };
 
         Ok(FieldItem {
             pattern_to_match,
-            transformation,
+            validation,
             field_name,
         })
     }
@@ -235,9 +235,9 @@ mod tests {
         Ok(resolved_fields)
     }
 
-    /// Helper to determine if a field spec has a transformation
-    fn has_transformation(field_spec: &FieldItem) -> bool {
-        field_spec.transformation.is_some()
+    /// Helper to determine if a field spec has a validation
+    fn has_validation(field_spec: &FieldItem) -> bool {
+        field_spec.validation.is_some()
     }
 
     #[test]
@@ -278,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_fragment_with_transformations() {
+    fn test_parse_fragment_with_validations() {
         let input = parse_quote! {
             fragment semantic {
                 Some(semantic) = valid_semantic_value(semantic),
@@ -288,8 +288,8 @@ mod tests {
 
         let fragment: Fragment = syn::parse2(input).unwrap();
         assert_eq!(fragment.fields.len(), 2);
-        assert!(has_transformation(&fragment.fields[0]));
-        assert!(!has_transformation(&fragment.fields[1]));
+        assert!(has_validation(&fragment.fields[0]));
+        assert!(!has_validation(&fragment.fields[1]));
     }
 
     #[test]

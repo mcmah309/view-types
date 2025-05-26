@@ -177,7 +177,7 @@ fn generate_original_conversion_methods(
         let has_unwrapping = view_struct
             .builder_fields
             .iter()
-            .any(|f| f.pattern_to_match.is_some());
+            .any(|e| e.pattern_to_match.is_some() || e.validation.is_some());
         let into_return_type = if has_unwrapping {
             quote! { Option<#view_name #view_generics> }
         } else {
@@ -282,12 +282,19 @@ fn generate_into_assignments(
             .expect("Should not be a tuple struct");
 
         let assignment = if let Some(pattern_path) = builder_field.pattern_to_match {
-            if let Some(transformation) = builder_field.transformation {
+            if let Some(validation) = builder_field.validation {
                 quote! {
-                    #field_name: if let #pattern_path(#field_name) = {
-                        let #field_name = self.#field_name;
-                        #transformation
-                    } { #field_name } else { return None }
+                    #field_name: if let #pattern_path(#field_name) = self.#field_name {
+                        {
+                            let #field_name = &#field_name;
+                            if !(#validation) {
+                                return None;
+                            }
+                        }
+                        #field_name
+                    } else { 
+                        return None;
+                    }
                 }
             } else {
                 quote! {
@@ -295,11 +302,14 @@ fn generate_into_assignments(
                 }
             }
         } else {
-            if let Some(transformation) = builder_field.transformation {
+            if let Some(validation) = builder_field.validation {
                 quote! {
                     #field_name: {
-                        let #field_name = self.#field_name;
-                        #transformation
+                        let #field_name = &self.#field_name;
+                        if !(#validation) {
+                            return None;
+                        }
+                        self.#field_name
                     }
                 }
             } else {
@@ -329,12 +339,16 @@ fn generate_ref_assignments(
 
         let assignment = if let Some(pattern_path) = builder_field.pattern_to_match {
             // Generate explicit pattern matching for references
-            if let Some(transformation) = builder_field.transformation {
+            if let Some(validation) = builder_field.validation {
                 quote! {
-                    #field_name: if let #pattern_path(#field_name) = {
-                        let #field_name = &self.#field_name;
-                        #transformation
-                    } { #field_name } else { return None }
+                    #field_name: if let #pattern_path(#field_name) = &self.#field_name {
+                        if !(#validation) {
+                            return None;
+                        }
+                        #field_name
+                    } else {
+                        return None;
+                    }
                 }
             } else {
                 quote! {
@@ -342,11 +356,14 @@ fn generate_ref_assignments(
                 }
             }
         } else {
-            if let Some(transformation) = builder_field.transformation {
+            if let Some(validation) = builder_field.validation {
                 quote! {
                     #field_name: {
                         let #field_name = &self.#field_name;
-                        &#transformation
+                        if !(#validation) {
+                            return None;
+                        }
+                        #field_name
                     }
                 }
             } else {
@@ -376,12 +393,19 @@ fn generate_mut_assignments(
             .expect("Should not be a tuple struct");
 
         let assignment = if let Some(pattern_path) = builder_field.pattern_to_match {
-            if let Some(transformation) = builder_field.transformation {
+            if let Some(validation) = builder_field.validation {
                 quote! {
-                    #field_name: if let #pattern_path(#field_name) = {
-                        let #field_name = &mut self.#field_name;
-                        #transformation
-                    } { #field_name } else { return None }
+                    #field_name: if let #pattern_path(#field_name) = &mut self.#field_name {
+                        {
+                            let #field_name = &*#field_name;
+                            if !(#validation) {
+                                return None;
+                            }
+                        }
+                        #field_name
+                    } else {
+                        return None;
+                    }
                 }
             } else {
                 quote! {
@@ -389,11 +413,17 @@ fn generate_mut_assignments(
                 }
             }
         } else {
-            if let Some(transformation) = builder_field.transformation {
+            if let Some(validation) = builder_field.validation {
                 quote! {
                     #field_name: {
                         let #field_name = &mut self.#field_name;
-                        &mut #transformation
+                        {
+                            let #field_name = &*#field_name;
+                            if !(#validation) {
+                                return None;
+                            }
+                        }
+                        #field_name
                     }
                 }
             } else {
