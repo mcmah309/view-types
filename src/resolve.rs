@@ -1,9 +1,10 @@
 use std::{
+    borrow::Cow,
     cell::OnceCell,
     collections::{HashMap, HashSet},
 };
 use syn::{
-    Error, Expr, Field, GenericArgument, GenericParam, Generics, Ident, ItemStruct, Type,
+    Error, Expr, Field, GenericArgument, GenericParam, Generics, Ident, ItemStruct, Lifetime, Type,
     Visibility,
 };
 
@@ -37,6 +38,8 @@ pub(crate) struct ViewStructBuilder<'a> {
     pub visibility: &'a Option<Visibility>,
     /// Generics that are added to the view struct *Ref and *Mut
     ref_generics: Option<syn::Generics>,
+    /// Generics that are used in the regular view struct
+    regular_generics: Option<syn::Generics>,
 }
 
 impl<'a> ViewStructBuilder<'a> {
@@ -54,22 +57,39 @@ impl<'a> ViewStructBuilder<'a> {
             attributes,
             visibility,
             ref_generics: None,
+            regular_generics: None,
         }
     }
 
-    pub fn add_ref_generic(&mut self, generic: GenericParam) {
-        if let Some(built_generics) = &mut self.ref_generics {
-            built_generics.params.insert(0, generic);
+    pub fn add_original_struct_lifetime_to_refs(&mut self) {
+        if self.ref_generics.is_some() {
             return;
         }
+        let new_lifetime = syn::parse_quote!('original_struct);
         if let Some(original_generics) = &self.original_generics {
             let mut new_generics = original_generics.clone();
-            new_generics.params.insert(0, generic);
+            new_generics.params.insert(0, new_lifetime);
             self.ref_generics = Some(new_generics);
         } else {
             let mut generics = Generics::default();
-            generics.params.push(generic);
+            generics.params.push(new_lifetime);
             self.ref_generics = Some(generics);
+        }
+    }
+
+    pub fn add_original_struct_lifetime_to_regular(&mut self) {
+        if self.regular_generics.is_some() {
+            return;
+        }
+        let new_lifetime = syn::parse_quote!('original_struct);
+        if let Some(original_generics) = &self.original_generics {
+            let mut new_generics = original_generics.clone();
+            new_generics.params.insert(0, new_lifetime);
+            self.regular_generics = Some(new_generics);
+        } else {
+            let mut generics = Generics::default();
+            generics.params.push(new_lifetime);
+            self.regular_generics = Some(generics);
         }
     }
 
@@ -83,15 +103,26 @@ impl<'a> ViewStructBuilder<'a> {
         }
     }
 
-    pub fn get_regular_generics(&self) -> &Option<syn::Generics> {
-        &self.original_generics
+    pub fn get_regular_generics(&self) -> Option<&syn::Generics> {
+        if let Some(generics) = &self.regular_generics {
+            return Some(generics);
+        }
+        if let Some(original_generics) = &self.original_generics {
+            return Some(original_generics);
+        }
+        None
     }
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct BuilderViewField<'a> {
-    pub original_struct_field: &'a Field,
-    pub this_struct_field_type: &'a syn::Type,
+    pub vis: &'a Visibility,
+    pub name: &'a Ident,
+    pub this_regular_struct_field_type: syn::Type,
+    pub this_ref_struct_field_type: syn::Type,
+    pub this_mut_struct_field_type: syn::Type,
+    pub is_ref: bool,
+    pub is_refs_and_original_struct_lifetime: bool,
     pub pattern_to_match: &'a Option<syn::Path>,
     pub validation: &'a Option<Expr>,
 }
@@ -102,14 +133,40 @@ impl<'a> BuilderViewField<'a> {
         pattern_to_match: &'a Option<syn::Path>,
         validation: &'a Option<Expr>,
     ) -> syn::Result<BuilderViewField<'a>> {
-        let this_struct_field_type = if pattern_to_match.is_some() {
-            get_inner_type_for_pattern_match(&original_struct_field.ty)?
+        let this_regular_struct_field_type;
+        let this_ref_struct_field_type;
+        let this_mut_struct_field_type;
+        let is_ref;
+        let is_refs_and_original_struct_lifetime;
+        if pattern_to_match.is_some() {
+            this_regular_struct_field_type =
+                get_inner_type_for_pattern_match(&original_struct_field.ty)?.clone();
         } else {
-            &original_struct_field.ty
-        };
+            this_regular_struct_field_type = original_struct_field.ty.clone();
+        }
+        let (is_ref_inner, type_changes) =
+            change_mut_and_lifetimes_if_ref(&this_regular_struct_field_type);
+        is_ref = is_ref_inner;
+        is_refs_and_original_struct_lifetime = type_changes.is_some();
+        if let Some((ref_type, mut_type)) = type_changes {
+            this_ref_struct_field_type = ref_type;
+            this_mut_struct_field_type = mut_type;
+        } else {
+            this_ref_struct_field_type = this_regular_struct_field_type.clone();
+            this_mut_struct_field_type = this_regular_struct_field_type.clone();
+        }
+
         Ok(BuilderViewField {
-            original_struct_field,
-            this_struct_field_type,
+            vis: &original_struct_field.vis,
+            name: &original_struct_field
+                .ident
+                .as_ref()
+                .expect("Should not be a tuple struct"),
+            this_regular_struct_field_type,
+            this_ref_struct_field_type,
+            this_mut_struct_field_type,
+            is_ref,
+            is_refs_and_original_struct_lifetime,
             pattern_to_match,
             validation,
         })
@@ -314,16 +371,56 @@ fn resolve_field_references<'a, 'b>(
             };
         }
 
-        builder_view_structs.push(ViewStructBuilder::new(
+        let mut struct_builder = ViewStructBuilder::new(
             &view_struct.name,
             &view_struct.generics,
             builder_fields,
             &view_struct.attributes,
             &view_struct.visibility,
-        ));
+        );
+
+        if struct_builder.builder_fields.iter().any(|e| e.is_ref) {
+            struct_builder.add_original_struct_lifetime_to_refs();
+        }
+
+        builder_view_structs.push(struct_builder);
     }
 
     Ok(builder_view_structs)
+}
+
+// todo make recursive?
+/// mut lifetimes need to become `'original_struct`, since otherwise it would imply the possibility to have two mutable references.
+/// and ref cannot take a mut, because the original struct will be borrowed as `&`
+/// returns the new type for (is_ref, (ref, mut))
+fn change_mut_and_lifetimes_if_ref(ty: &syn::Type) -> (bool, Option<(syn::Type, syn::Type)>) {
+    match ty {
+        syn::Type::Reference(reference) => {
+            if reference.mutability.is_some() {
+                let lifetime: Lifetime = syn::parse_quote!('original_struct);
+                (
+                    true,
+                    Some((
+                        syn::Type::Reference(syn::TypeReference {
+                            and_token: reference.and_token.clone(),
+                            lifetime: Some(lifetime.clone()),
+                            mutability: None,
+                            elem: Box::new(reference.elem.as_ref().clone()),
+                        }),
+                        (syn::Type::Reference(syn::TypeReference {
+                            and_token: reference.and_token.clone(),
+                            lifetime: Some(lifetime),
+                            mutability: reference.mutability.clone(),
+                            elem: Box::new(reference.elem.as_ref().clone()),
+                        })),
+                    )),
+                )
+            } else {
+                (true, None)
+            }
+        }
+        _ => (false, None),
+    }
 }
 
 fn get_inner_type_for_pattern_match(ty: &Type) -> syn::Result<&Type> {

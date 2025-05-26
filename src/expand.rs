@@ -40,19 +40,13 @@ fn generate_view_struct(view_structs: &ViewStructBuilder) -> syn::Result<proc_ma
 
     let mut struct_fields = Vec::new();
     for builder_field in builder_fields {
-        let Field {
-            attrs: _, // todo get any attributes from the view struct/fragment fields (we don't want to use the original)
-            vis,
-            mutability: _,
-            ident,
-            colon_token: _,
-            ty: _,
-        } = builder_field.original_struct_field;
-
-        let ty = &builder_field.this_struct_field_type;
+        // todo get any attributes from the view struct/fragment fields (we don't want to use the original)
+        let vis = builder_field.vis;
+        let field_name = builder_field.name;
+        let ty = &builder_field.this_regular_struct_field_type;
 
         struct_fields.push(quote! {
-            #vis #ident: #ty
+            #vis #field_name: #ty
         });
     }
 
@@ -82,17 +76,14 @@ fn generate_ref_view_structs_and_methods(
     let mut immutable_struct_fields = Vec::new();
     let mut mutable_struct_fields = Vec::new();
     for builder_field in &view_structs.builder_fields {
-        let Field {
-            attrs: _, // todo get any attributes from the view struct/fragment fields (we don't want to use the original which is this)
-            vis,
-            mutability: _,
-            ident,
-            colon_token: _,
-            ty: _,
-        } = builder_field.original_struct_field;
-        let ty = builder_field.this_struct_field_type;
+        // todo get any attributes from the view struct/fragment fields (we don't want to use the original)
+        let vis = builder_field.vis;
+        let field_name = builder_field.name;
+        let ref_ty = &builder_field.this_ref_struct_field_type;
+        let mut_ty = &builder_field.this_mut_struct_field_type;
 
-        let (additional_immutable_ref, additional_mutable_ref) = match ty {
+        // Note: no need to check both, they both will be references or not
+        let (additional_immutable_ref, additional_mutable_ref) = match ref_ty {
             syn::Type::Reference(_) => (None, None),
             _ => {
                 uses_additional_lifetime = true;
@@ -104,10 +95,10 @@ fn generate_ref_view_structs_and_methods(
         };
 
         immutable_struct_fields.push(quote! {
-            #vis #ident : #additional_immutable_ref #ty
+            #vis #field_name : #additional_immutable_ref #ref_ty
         });
         mutable_struct_fields.push(quote! {
-            #vis #ident : #additional_mutable_ref #ty
+            #vis #field_name : #additional_mutable_ref #mut_ty
         });
     }
 
@@ -117,7 +108,7 @@ fn generate_ref_view_structs_and_methods(
     // Add lifetime parameter if does not already exist and needed
     let struct_generics: Option<proc_macro2::TokenStream>;
     if uses_additional_lifetime {
-        view_structs.add_ref_generic(syn::parse_quote!('original_struct));
+        view_structs.add_original_struct_lifetime_to_refs();
         let (_, type_generics, where_clause) =
             view_structs.get_ref_generics().unwrap().split_for_impl();
         struct_generics = Some(quote! { #type_generics #where_clause });
@@ -275,11 +266,7 @@ fn generate_into_assignments(
     let mut assignments = Vec::new();
 
     for builder_field in builder_fields {
-        let field_name = builder_field
-            .original_struct_field
-            .ident
-            .as_ref()
-            .expect("Should not be a tuple struct");
+        let field_name = builder_field.name;
 
         let assignment = if let Some(pattern_path) = builder_field.pattern_to_match {
             if let Some(validation) = builder_field.validation {
@@ -292,7 +279,7 @@ fn generate_into_assignments(
                             }
                         }
                         #field_name
-                    } else { 
+                    } else {
                         return None;
                     }
                 }
@@ -331,11 +318,7 @@ fn generate_ref_assignments(
     let mut assignments = Vec::new();
 
     for builder_field in builder_fields {
-        let field_name = builder_field
-            .original_struct_field
-            .ident
-            .as_ref()
-            .expect("Should not be a tuple struct");
+        let field_name = builder_field.name;
 
         let assignment = if let Some(pattern_path) = builder_field.pattern_to_match {
             // Generate explicit pattern matching for references
@@ -386,11 +369,12 @@ fn generate_mut_assignments(
     let mut assignments = Vec::new();
 
     for builder_field in builder_fields {
-        let field_name = builder_field
-            .original_struct_field
-            .ident
-            .as_ref()
-            .expect("Should not be a tuple struct");
+        let field_name = builder_field.name;
+        let final_deref = if builder_field.is_refs_and_original_struct_lifetime {
+            quote! { &mut *#field_name }
+        } else {
+            quote! { #field_name }
+        };
 
         let assignment = if let Some(pattern_path) = builder_field.pattern_to_match {
             if let Some(validation) = builder_field.validation {
@@ -402,14 +386,14 @@ fn generate_mut_assignments(
                                 return None;
                             }
                         }
-                        #field_name
+                        #final_deref
                     } else {
                         return None;
                     }
                 }
             } else {
                 quote! {
-                    #field_name: if let #pattern_path(#field_name) = &mut self.#field_name { #field_name } else { return None }
+                    #field_name: if let #pattern_path(#field_name) = &mut self.#field_name { #final_deref } else { return None }
                 }
             }
         } else {
@@ -423,12 +407,15 @@ fn generate_mut_assignments(
                                 return None;
                             }
                         }
-                        #field_name
+                        #final_deref
                     }
                 }
             } else {
                 quote! {
-                    #field_name: &mut self.#field_name
+                    #field_name: {
+                        let #field_name = &mut self.#field_name;
+                        #final_deref
+                    }
                 }
             }
         };
