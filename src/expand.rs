@@ -1,27 +1,27 @@
 use quote::{format_ident, quote};
-use syn::{Field, ItemStruct, token::Type};
+use syn::{Expr, Field, GenericArgument, Ident, ItemStruct, Type, Visibility};
 
-use crate::resolve::{Resolution, ResolvedViewField, ResolvedViewStruct};
+use crate::resolve::{Builder, BuilderViewField, ViewStructBuilder};
 
 pub(crate) fn expand<'a>(
     original_struct: &'a ItemStruct,
-    resolution: Resolution<'a>,
+    mut builder: Builder<'a>,
 ) -> syn::Result<proc_macro2::TokenStream> {
     let mut generated_code = Vec::new();
 
-    for resolved_view in &resolution.view_structs {
-        let view_struct = generate_view_struct(resolved_view)?;
-        let ref_structs = generate_ref_view_structs_and_methods(resolved_view)?;
+    for view_structs in &mut builder.view_structs {
+        let view_struct = generate_view_struct(view_structs)?;
+        let ref_structs = generate_ref_view_structs_and_methods(view_structs)?;
 
         generated_code.push(view_struct);
         generated_code.push(ref_structs);
     }
 
-    let conversion_impl = generate_original_conversion_methods(original_struct, &resolution)?;
+    let conversion_impl = generate_original_conversion_methods(original_struct, &builder)?;
     generated_code.push(conversion_impl);
 
     // todo
-    // let inter_view_conversions = generate_inter_view_conversions(&resolution)?;
+    // let inter_view_conversions = generate_inter_view_conversions(&context)?;
     // generated_code.extend(inter_view_conversions);
 
     Ok(quote! {
@@ -29,63 +29,34 @@ pub(crate) fn expand<'a>(
     })
 }
 
-fn generate_view_struct(
-    resolved_view: &ResolvedViewStruct,
-) -> syn::Result<proc_macro2::TokenStream> {
-    let ResolvedViewStruct {
+fn generate_view_struct(view_structs: &ViewStructBuilder) -> syn::Result<proc_macro2::TokenStream> {
+    let ViewStructBuilder {
         name,
-        generics,
-        resolved_fields,
+        builder_fields,
         attributes,
         visibility,
-    } = resolved_view;
+        ..
+    } = view_structs;
 
     let mut struct_fields = Vec::new();
-    for resolved_field in resolved_fields {
+    for builder_field in builder_fields {
         let Field {
             attrs: _, // todo get any attributes from the view struct/fragment fields (we don't want to use the original)
             vis,
             mutability: _,
             ident,
             colon_token: _,
-            ty,
-        } = resolved_field.original_struct_field;
+            ty: _,
+        } = builder_field.original_struct_field;
 
-        let correct_type = if resolved_field.pattern_to_match.is_some() {
-            let error = || {
-                Err(syn::Error::new_spanned(
-                    // todo: how to handle this for regular deconstruction since we don't know the type to use?
-                    ty,
-                    "Pattern deconstructing is only implemented for single generic types. Otherwise the type being mapped to is ambagious.",
-                ))
-            };
-            match ty {
-                syn::Type::Path(ty) => {
-                    let arguments = &ty.path.segments.last().unwrap().arguments;
-                    match arguments {
-                        syn::PathArguments::AngleBracketed(generic_arguments) => {
-                            let mut args = generic_arguments.args.iter();
-                            let inner_type = args.next().unwrap();
-                            if args.len() != 0 {
-                                return error();
-                            }
-                            quote! { #inner_type}
-                        }
-                        _ => return error(),
-                    }
-                }
-                _ => return error(),
-            }
-        } else {
-            quote! {#ty}
-        };
+        let ty = &builder_field.this_struct_field_type;
 
         struct_fields.push(quote! {
-            #vis #ident: #correct_type
+            #vis #ident: #ty
         });
     }
 
-    let generics_clause = if let Some(g) = generics {
+    let generics_clause = if let Some(g) = view_structs.get_regular_generics() {
         quote! { #g }
     } else {
         quote! {}
@@ -101,16 +72,8 @@ fn generate_view_struct(
 
 /// Generate a reference and mutable reference structs
 fn generate_ref_view_structs_and_methods(
-    resolved_view: &ResolvedViewStruct,
+    view_structs: &mut ViewStructBuilder,
 ) -> syn::Result<proc_macro2::TokenStream> {
-    let ResolvedViewStruct {
-        name,
-        generics,
-        resolved_fields,
-        attributes,
-        visibility,
-    } = resolved_view;
-
     // todo check this lifetime does not exist
     let all_owned_fields_additional_immutable_ref = quote! { &'original_struct };
     let all_owned_fields_additional_mutable_ref = quote! { &'original_struct mut};
@@ -118,15 +81,16 @@ fn generate_ref_view_structs_and_methods(
 
     let mut immutable_struct_fields = Vec::new();
     let mut mutable_struct_fields = Vec::new();
-    for resolved_field in resolved_fields {
+    for builder_field in &view_structs.builder_fields {
         let Field {
             attrs: _, // todo get any attributes from the view struct/fragment fields (we don't want to use the original which is this)
             vis,
             mutability: _,
             ident,
             colon_token: _,
-            ty,
-        } = resolved_field.original_struct_field;
+            ty: _,
+        } = builder_field.original_struct_field;
+        let ty = builder_field.this_struct_field_type;
 
         let (additional_immutable_ref, additional_mutable_ref) = match ty {
             syn::Type::Reference(_) => (None, None),
@@ -147,37 +111,31 @@ fn generate_ref_view_structs_and_methods(
         });
     }
 
+    let ref_struct_name = format_ident!("{}Ref", view_structs.name);
+    let mut_struct_name = format_ident!("{}Mut", view_structs.name);
+
     // Add lifetime parameter if does not already exist and needed
-    let struct_lifetime_generics: Option<proc_macro2::TokenStream>;
+    let struct_generics: Option<proc_macro2::TokenStream>;
     if uses_additional_lifetime {
-        if let Some(generics) = generics {
-            let mut new_generics = generics.clone();
-            new_generics
-                .params
-                .insert(0, syn::parse_quote!('original_struct));
-            struct_lifetime_generics = Some(quote! { #new_generics });
-        } else {
-            struct_lifetime_generics = Some(quote! { <'original_struct> });
-        };
+        view_structs.add_ref_generic(syn::parse_quote!('original_struct));
+        let (_, type_generics, where_clause) =
+            view_structs.get_ref_generics().unwrap().split_for_impl();
+        struct_generics = Some(quote! { #type_generics #where_clause });
     } else {
-        if let Some(generics) = generics {
-            struct_lifetime_generics = Some(quote! { #generics });
-        } else {
-            struct_lifetime_generics = None;
-        }
+        struct_generics = None;
     }
 
-    let ref_struct_name = format_ident!("{}Ref", name);
-    let mut_struct_name = format_ident!("{}Mut", name);
+    let attributes = view_structs.attributes;
+    let visibility = view_structs.visibility;
 
     Ok(quote! {
         #(#attributes)*
-        #visibility struct #ref_struct_name #struct_lifetime_generics {
+        #visibility struct #ref_struct_name #struct_generics {
             #(#immutable_struct_fields,)*
         }
 
         #(#attributes)*
-        #visibility struct #mut_struct_name #struct_lifetime_generics {
+        #visibility struct #mut_struct_name #struct_generics {
             #(#mutable_struct_fields,)*
         }
     })
@@ -186,16 +144,21 @@ fn generate_ref_view_structs_and_methods(
 /// Generate conversion methods on the original struct
 fn generate_original_conversion_methods(
     original_struct: &ItemStruct,
-    resolution: &Resolution,
+    context: &Builder,
 ) -> syn::Result<proc_macro2::TokenStream> {
     let original_name = &original_struct.ident;
     let original_generics = &original_struct.generics;
-    let (impl_generics, ty_generics, where_clause) = original_generics.split_for_impl();
+    let (_, original_ty_generics, original_where_clause) = original_generics.split_for_impl();
+    let mut generics_with_new_lifetime = original_generics.clone();
+    generics_with_new_lifetime
+        .params
+        .insert(0, syn::parse_quote!('original_struct));
+    let (impl_generics, _, _) = generics_with_new_lifetime.split_for_impl();
 
     let mut methods = Vec::new();
 
-    for resolved_view in &resolution.view_structs {
-        let view_name = resolved_view.name;
+    for view_struct in &context.view_structs {
+        let view_name = view_struct.name;
         let snake_case_name = pascal_to_snake_case(&view_name.to_string());
 
         let into_method = format_ident!("into_{}", snake_case_name);
@@ -203,20 +166,16 @@ fn generate_original_conversion_methods(
         let as_mut_method = format_ident!("as_{}_mut", snake_case_name);
 
         // Generate field assignments
-        let into_assignments = generate_into_assignments(&resolved_view.resolved_fields)?;
-        let ref_assignments = generate_ref_assignments(&resolved_view.resolved_fields)?;
-        let mut_assignments = generate_mut_assignments(&resolved_view.resolved_fields)?;
+        let into_assignments = generate_into_assignments(&view_struct.builder_fields)?;
+        let ref_assignments = generate_ref_assignments(&view_struct.builder_fields)?;
+        let mut_assignments = generate_mut_assignments(&view_struct.builder_fields)?;
 
         // Determine return types
-        let view_generics = if let Some(g) = resolved_view.generics {
-            quote! { #g }
-        } else {
-            quote! {}
-        };
+        let view_generics = view_struct.get_regular_generics();
 
         // Check if any field requires unwrapping (pattern matching)
-        let has_unwrapping = resolved_view
-            .resolved_fields
+        let has_unwrapping = view_struct
+            .builder_fields
             .iter()
             .any(|f| f.pattern_to_match.is_some());
         let into_return_type = if has_unwrapping {
@@ -228,16 +187,21 @@ fn generate_original_conversion_methods(
         let ref_struct_name = format_ident!("{}Ref", view_name);
         let mut_struct_name = format_ident!("{}Mut", view_name);
 
+        let ref_struct_generics = view_struct.get_ref_generics().map(|e| {
+            let (_, type_generics, _) = e.split_for_impl();
+            type_generics
+        });
+
         let ref_return_type = if has_unwrapping {
-            quote! { Option<#ref_struct_name<'_>> }
+            quote! { Option<#ref_struct_name # ref_struct_generics> }
         } else {
-            quote! { #ref_struct_name<'_> }
+            quote! { #ref_struct_name #ref_struct_generics }
         };
 
         let mut_return_type = if has_unwrapping {
-            quote! { Option<#mut_struct_name<'_>> }
+            quote! { Option<#mut_struct_name #ref_struct_generics> }
         } else {
-            quote! { #mut_struct_name<'_> }
+            quote! { #mut_struct_name #ref_struct_generics }
         };
 
         // Method bodies
@@ -288,39 +252,37 @@ fn generate_original_conversion_methods(
                 #into_body
             }
 
-            pub fn #as_ref_method(&self) -> #ref_return_type {
+            pub fn #as_ref_method(&'original_struct self) -> #ref_return_type {
                 #ref_body
             }
 
-            pub fn #as_mut_method(&mut self) -> #mut_return_type {
+            pub fn #as_mut_method(&'original_struct mut self) -> #mut_return_type {
                 #mut_body
             }
         });
     }
 
     Ok(quote! {
-        impl #impl_generics #original_name #ty_generics #where_clause {
+        impl #impl_generics #original_name #original_ty_generics #original_where_clause {
             #(#methods)*
         }
     })
 }
 
 fn generate_into_assignments(
-    resolved_fields: &[ResolvedViewField],
+    builder_fields: &[BuilderViewField],
 ) -> syn::Result<Vec<proc_macro2::TokenStream>> {
     let mut assignments = Vec::new();
 
-    for resolved_field in resolved_fields {
-        let field_name = resolved_field
+    for builder_field in builder_fields {
+        let field_name = builder_field
             .original_struct_field
             .ident
             .as_ref()
             .expect("Should not be a tuple struct");
 
-        let assignment = if let Some(pattern_path) = resolved_field.pattern_to_match {
-            // Generate explicit pattern matching assignment
-            if let Some(transformation) = resolved_field.transformation {
-                // Pattern with transformation: if let Pattern(field) = transform(original_field) { field } else { return None }
+        let assignment = if let Some(pattern_path) = builder_field.pattern_to_match {
+            if let Some(transformation) = builder_field.transformation {
                 quote! {
                     #field_name: if let #pattern_path(#field_name) = {
                         let #field_name = self.#field_name;
@@ -328,14 +290,12 @@ fn generate_into_assignments(
                     } { #field_name } else { return None }
                 }
             } else {
-                // Simple pattern: if let Pattern(field) = original_field { field } else { return None }
                 quote! {
                     #field_name: if let #pattern_path(#field_name) = self.#field_name { #field_name } else { return None }
                 }
             }
         } else {
-            // No pattern matching needed
-            if let Some(transformation) = resolved_field.transformation {
+            if let Some(transformation) = builder_field.transformation {
                 quote! {
                     #field_name: {
                         let #field_name = self.#field_name;
@@ -356,36 +316,33 @@ fn generate_into_assignments(
 }
 
 fn generate_ref_assignments(
-    resolved_fields: &[ResolvedViewField],
+    builder_fields: &[BuilderViewField],
 ) -> syn::Result<Vec<proc_macro2::TokenStream>> {
     let mut assignments = Vec::new();
 
-    for resolved_field in resolved_fields {
-        let field_name = resolved_field
+    for builder_field in builder_fields {
+        let field_name = builder_field
             .original_struct_field
             .ident
             .as_ref()
             .expect("Should not be a tuple struct");
 
-        let assignment = if let Some(pattern_path) = resolved_field.pattern_to_match {
+        let assignment = if let Some(pattern_path) = builder_field.pattern_to_match {
             // Generate explicit pattern matching for references
-            if let Some(transformation) = resolved_field.transformation {
-                // Pattern with transformation for refs
+            if let Some(transformation) = builder_field.transformation {
                 quote! {
-                    #field_name: if let #pattern_path(ref #field_name) = {
+                    #field_name: if let #pattern_path(#field_name) = {
                         let #field_name = &self.#field_name;
                         #transformation
                     } { #field_name } else { return None }
                 }
             } else {
-                // Simple pattern: if let Pattern(ref field) = &original_field { field } else { return None }
                 quote! {
-                    #field_name: if let #pattern_path(ref #field_name) = &self.#field_name { #field_name } else { return None }
+                    #field_name: if let #pattern_path(#field_name) = &self.#field_name { #field_name } else { return None }
                 }
             }
         } else {
-            // No pattern matching, just take reference
-            if let Some(transformation) = resolved_field.transformation {
+            if let Some(transformation) = builder_field.transformation {
                 quote! {
                     #field_name: {
                         let #field_name = &self.#field_name;
@@ -407,36 +364,32 @@ fn generate_ref_assignments(
 
 /// Generate field assignments for as_mut methods
 fn generate_mut_assignments(
-    resolved_fields: &[ResolvedViewField],
+    builder_fields: &[BuilderViewField],
 ) -> syn::Result<Vec<proc_macro2::TokenStream>> {
     let mut assignments = Vec::new();
 
-    for resolved_field in resolved_fields {
-        let field_name = resolved_field
+    for builder_field in builder_fields {
+        let field_name = builder_field
             .original_struct_field
             .ident
             .as_ref()
             .expect("Should not be a tuple struct");
 
-        let assignment = if let Some(pattern_path) = resolved_field.pattern_to_match {
-            // Generate explicit pattern matching for mutable references
-            if let Some(transformation) = resolved_field.transformation {
-                // Pattern with transformation for mut refs
+        let assignment = if let Some(pattern_path) = builder_field.pattern_to_match {
+            if let Some(transformation) = builder_field.transformation {
                 quote! {
-                    #field_name: if let #pattern_path(ref mut #field_name) = {
+                    #field_name: if let #pattern_path(#field_name) = {
                         let #field_name = &mut self.#field_name;
                         #transformation
                     } { #field_name } else { return None }
                 }
             } else {
-                // Simple pattern: if let Pattern(ref mut field) = &mut original_field { field } else { return None }
                 quote! {
-                    #field_name: if let #pattern_path(ref mut #field_name) = &mut self.#field_name { #field_name } else { return None }
+                    #field_name: if let #pattern_path(#field_name) = &mut self.#field_name { #field_name } else { return None }
                 }
             }
         } else {
-            // No pattern matching, just take mutable reference
-            if let Some(transformation) = resolved_field.transformation {
+            if let Some(transformation) = builder_field.transformation {
                 quote! {
                     #field_name: {
                         let #field_name = &mut self.#field_name;

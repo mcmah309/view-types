@@ -31,7 +31,8 @@ fn validate_ratio(ratio: impl Borrow<Option<f32>>) -> Option<f32> {
         ..all,
         ..keyword,
         ..semantic,
-        Some(ratio) = validate_ratio(ratio)
+        // Some(ratio) = validate_ratio(ratio)
+        Some(ratio)
     }
 )]
 pub struct Search<'a> {
