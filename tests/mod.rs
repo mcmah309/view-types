@@ -15,7 +15,7 @@ fn validate_ratio(ratio: &f32) -> bool {
         words_limit
     }
     fragment semantic {
-        Some(vector)
+        Some(vector) if vector.len() == 768
     }
     struct KeywordSearch {
         ..all,
