@@ -1,5 +1,5 @@
 use quote::{format_ident, quote};
-use syn::{Expr, Field, GenericArgument, Ident, ItemStruct, Type, Visibility};
+use syn::ItemStruct;
 
 use crate::resolve::{Builder, BuilderViewField, ViewStructBuilder};
 

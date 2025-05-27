@@ -1,11 +1,6 @@
-use std::{
-    borrow::Cow,
-    cell::OnceCell,
-    collections::{HashMap, HashSet},
-};
+use std::collections::{HashMap, HashSet};
 use syn::{
-    Error, Expr, Field, GenericArgument, GenericParam, Generics, Ident, ItemStruct, Lifetime, Type,
-    Visibility,
+    Error, Expr, Field, GenericArgument, Generics, Ident, ItemStruct, Lifetime, Type, Visibility,
 };
 
 use crate::parse::{ViewStructFieldKind, Views};
@@ -77,21 +72,21 @@ impl<'a> ViewStructBuilder<'a> {
         }
     }
 
-    pub fn add_original_struct_lifetime_to_regular(&mut self) {
-        if self.regular_generics.is_some() {
-            return;
-        }
-        let new_lifetime = syn::parse_quote!('original_struct);
-        if let Some(original_generics) = &self.original_generics {
-            let mut new_generics = original_generics.clone();
-            new_generics.params.insert(0, new_lifetime);
-            self.regular_generics = Some(new_generics);
-        } else {
-            let mut generics = Generics::default();
-            generics.params.push(new_lifetime);
-            self.regular_generics = Some(generics);
-        }
-    }
+    // pub fn add_original_struct_lifetime_to_regular(&mut self) {
+    //     if self.regular_generics.is_some() {
+    //         return;
+    //     }
+    //     let new_lifetime = syn::parse_quote!('original_struct);
+    //     if let Some(original_generics) = &self.original_generics {
+    //         let mut new_generics = original_generics.clone();
+    //         new_generics.params.insert(0, new_lifetime);
+    //         self.regular_generics = Some(new_generics);
+    //     } else {
+    //         let mut generics = Generics::default();
+    //         generics.params.push(new_lifetime);
+    //         self.regular_generics = Some(generics);
+    //     }
+    // }
 
     pub fn get_ref_generics(&self) -> Option<&syn::Generics> {
         if let Some(generics) = &self.ref_generics {
@@ -144,7 +139,8 @@ impl<'a> BuilderViewField<'a> {
                 this_regular_struct_field_type = explicit_type.clone();
             } else {
                 this_regular_struct_field_type =
-                    get_inner_type_for_pattern_match(&original_struct_field.ty, pattern_to_match)?.clone()
+                    get_inner_type_for_pattern_match(&original_struct_field.ty, pattern_to_match)?
+                        .clone()
             }
         } else {
             if let Some(explicit_type) = explicit_type {
@@ -434,7 +430,10 @@ fn change_mut_and_lifetimes_if_ref(ty: &syn::Type) -> (bool, Option<(syn::Type, 
     }
 }
 
-fn get_inner_type_for_pattern_match<'a>(ty: &'a Type, pattern_match: &syn::Path) -> syn::Result<&'a Type> {
+fn get_inner_type_for_pattern_match<'a>(
+    ty: &'a Type,
+    pattern_match: &syn::Path,
+) -> syn::Result<&'a Type> {
     let error = || {
         Err(syn::Error::new_spanned(
             pattern_match,
@@ -455,12 +454,15 @@ fn get_inner_type_for_pattern_match<'a>(ty: &'a Type, pattern_match: &syn::Path)
                             let Some(err) = args.next() else {
                                 return error();
                             };
-                            let is_ok = pattern_match.segments.last().unwrap().ident.to_string().as_str() == "Ok";
-                            let type_to_use = if is_ok {
-                                ok
-                            } else {
-                                err
-                            };
+                            let is_ok = pattern_match
+                                .segments
+                                .last()
+                                .unwrap()
+                                .ident
+                                .to_string()
+                                .as_str()
+                                == "Ok";
+                            let type_to_use = if is_ok { ok } else { err };
                             match type_to_use {
                                 GenericArgument::Type(inner_type) => return Ok(inner_type),
                                 _ => return error(),
@@ -468,7 +470,7 @@ fn get_inner_type_for_pattern_match<'a>(ty: &'a Type, pattern_match: &syn::Path)
                         }
                         _ => return error(),
                     }
-                },
+                }
                 "Option" => {
                     let arguments = &ty_last_segment.arguments;
                     match arguments {
@@ -485,7 +487,7 @@ fn get_inner_type_for_pattern_match<'a>(ty: &'a Type, pattern_match: &syn::Path)
                         }
                         _ => return error(),
                     }
-                },
+                }
                 _ => return error(),
             };
         }
