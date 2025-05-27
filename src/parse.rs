@@ -62,20 +62,26 @@ impl Parse for Views {
                 if ident == "fragment" {
                     let fragment = input.parse::<Fragment>()?;
                     fragments.push(fragment);
-                } else {
+                } else if ident == "view" {
+                    let view_struct = input.parse::<ViewStruct>()?;
+                    view_structs.push(view_struct);
+                }
+                else {
                     return Err(syn::Error::new(
                         ident.span(),
-                        "Expected 'fragment' or 'struct'",
+                        "Expected 'fragment' or 'view'",
                     ));
                 }
-            } else if lookahead.peek(Token![struct])
-                || lookahead.peek(Token![#])
+            } else if lookahead.peek(Token![#])
                 || lookahead.peek(Token![pub])
             {
                 let view_struct = input.parse::<ViewStruct>()?;
                 view_structs.push(view_struct);
             } else {
-                return Err(lookahead.error());
+                return Err(syn::Error::new(
+                    input.span(),
+                    "Expected 'fragment', 'view', attribute, or visibility",
+                ));
             }
         }
 
@@ -119,7 +125,13 @@ impl Parse for ViewStruct {
     fn parse(input: ParseStream) -> Result<Self> {
         let attributes = input.call(syn::Attribute::parse_outer)?;
         let visibility = input.parse::<Visibility>().ok();
-        input.parse::<Token![struct]>()?;
+        let ty = input.parse::<Ident>()?;
+        if ty.to_string().as_str() != "view" {
+            return Err(syn::Error::new(
+                ty.span(),
+                "Expected 'view' keyword",
+            ));
+        }
         let name: Ident = input.parse()?;
 
         // Parse optional generics

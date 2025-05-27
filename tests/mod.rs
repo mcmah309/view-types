@@ -27,15 +27,15 @@ mod regular {
         Some(vector) if vector.len() == 768,
         mut_number
     }
-    struct KeywordSearch {
+    view KeywordSearch {
         ..all,
         ..keyword,
     }
-    struct SemanticSearch<'a> {
+    view SemanticSearch<'a> {
         ..all,
         ..semantic,
     }
-    struct HybridSearch<'a> {
+    view HybridSearch<'a> {
         ..all,
         ..keyword,
         ..semantic,
@@ -128,15 +128,15 @@ mod builder {
         Some(vector) if vector.len() == 768,
         mut_number
     }
-    struct KeywordSearch {
+    view KeywordSearch {
         ..all,
         ..keyword,
     }
-    struct SemanticSearch<'a> {
+    view SemanticSearch<'a> {
         ..all,
         ..semantic,
     }
-    struct HybridSearch<'a> {
+    view HybridSearch<'a> {
         ..all,
         ..keyword,
         ..semantic,
