@@ -1,6 +1,12 @@
 mod regular {
     use view_types::views;
 
+    #[derive(Debug)]
+    enum CannotInferType {
+        Branch1(String),
+        Branch2(usize)
+    }
+
     fn validate_ratio(ratio: &f32) -> bool {
         *ratio >= 0.0 && *ratio <= 1.0
     }
@@ -9,10 +15,11 @@ mod regular {
     fragment all {
         offset,
         limit,
+        CannotInferType::Branch1(cannot_infer_type: String)
     }
     fragment keyword {
         Some(query),
-        words_limit
+        words_limit: Option<usize>
     }
     fragment semantic {
         Some(vector) if vector.len() == 768,
@@ -43,6 +50,7 @@ mod regular {
         ratio: Option<f32>,
         mut_number: &'a mut usize,
         field_never_used: bool,
+        cannot_infer_type: CannotInferType,
     }
 
     #[test]
@@ -58,6 +66,7 @@ mod regular {
             ratio: Some(0.5),
             mut_number: &mut magic_number,
             field_never_used: true,
+            cannot_infer_type: CannotInferType::Branch1("branch1".to_owned())
         };
 
         let hybrid_ref: Option<HybridSearchRef<'_, '_>> = search.as_hybrid_search_ref();

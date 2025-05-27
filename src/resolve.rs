@@ -131,6 +131,7 @@ impl<'a> BuilderViewField<'a> {
     pub fn new(
         original_struct_field: &'a Field,
         pattern_to_match: &'a Option<syn::Path>,
+        explicit_type: &'a Option<syn::Type>,
         validation: &'a Option<Expr>,
     ) -> syn::Result<BuilderViewField<'a>> {
         let this_regular_struct_field_type;
@@ -138,11 +139,19 @@ impl<'a> BuilderViewField<'a> {
         let this_mut_struct_field_type;
         let is_ref;
         let is_refs_and_original_struct_lifetime;
-        if pattern_to_match.is_some() {
-            this_regular_struct_field_type =
-                get_inner_type_for_pattern_match(&original_struct_field.ty)?.clone();
+        if let Some(pattern_to_match) = pattern_to_match {
+            if let Some(explicit_type) = explicit_type {
+                this_regular_struct_field_type = explicit_type.clone();
+            } else {
+                this_regular_struct_field_type =
+                    get_inner_type_for_pattern_match(&original_struct_field.ty, pattern_to_match)?.clone()
+            }
         } else {
-            this_regular_struct_field_type = original_struct_field.ty.clone();
+            if let Some(explicit_type) = explicit_type {
+                this_regular_struct_field_type = explicit_type.clone();
+            } else {
+                this_regular_struct_field_type = original_struct_field.ty.clone();
+            }
         }
         let (is_ref_inner, type_changes) =
             change_mut_and_lifetimes_if_ref(&this_regular_struct_field_type);
@@ -319,6 +328,7 @@ fn resolve_field_references<'a, 'b>(
                 builder_fragment_fields.push(BuilderViewField::new(
                     original_field,
                     &fragment_field_item.pattern_to_match,
+                    &fragment_field_item.explicit_type,
                     &fragment_field_item.validation,
                 )?);
             } else {
@@ -359,6 +369,7 @@ fn resolve_field_references<'a, 'b>(
                         builder_fields.push(BuilderViewField::new(
                             original_field,
                             &field_item.pattern_to_match,
+                            &field_item.explicit_type,
                             &field_item.validation,
                         )?);
                     } else {
@@ -423,12 +434,11 @@ fn change_mut_and_lifetimes_if_ref(ty: &syn::Type) -> (bool, Option<(syn::Type, 
     }
 }
 
-fn get_inner_type_for_pattern_match(ty: &Type) -> syn::Result<&Type> {
+fn get_inner_type_for_pattern_match<'a>(ty: &'a Type, pattern_match: &syn::Path) -> syn::Result<&'a Type> {
     let error = || {
         Err(syn::Error::new_spanned(
-            // todo: how to handle this for regular deconstruction since we don't know the type to use?
-            ty,
-            "Pattern deconstructing is only implemented for single generic types. Otherwise the type being mapped to is ambagious.",
+            pattern_match,
+            "Anonymous pattern deconstructing is only implemented for single generic types. The type being mapped to is ambagious. Add a type definition for the inner e.g. `EnumName::Branch(field: Type)`",
         ))
     };
     match ty {

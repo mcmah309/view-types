@@ -1,5 +1,7 @@
 use syn::{
-    braced, parenthesized, parse::{Parse, ParseStream, Result}, token::Paren, Expr, Ident, Token, Visibility
+    Expr, Ident, Token, Visibility, braced, parenthesized,
+    parse::{Parse, ParseStream, Result},
+    token::Paren,
 };
 
 /// Top-level view specification with fragments and structs
@@ -21,7 +23,7 @@ pub(crate) struct ViewStruct {
     pub generics: Option<syn::Generics>,
     pub items: Vec<ViewStructFieldKind>,
     pub attributes: Vec<syn::Attribute>,
-    pub visibility: Option<Visibility>
+    pub visibility: Option<Visibility>,
 }
 
 /// Items that can appear in a view struct definition
@@ -41,6 +43,8 @@ pub(crate) struct FieldItem {
     pub pattern_to_match: Option<syn::Path>,
     /// e.g. `validate(field)` in `field if validate(field)`
     pub validation: Option<Expr>,
+    /// Explicit type annotation, e.g. `field: Type` or EnumName::Branch(field: Type)
+    pub explicit_type: Option<syn::Type>,
 }
 
 impl Parse for Views {
@@ -64,7 +68,10 @@ impl Parse for Views {
                         "Expected 'fragment' or 'struct'",
                     ));
                 }
-            } else if lookahead.peek(Token![struct]) || lookahead.peek(Token![#]) || lookahead.peek(Token![pub]) {
+            } else if lookahead.peek(Token![struct])
+                || lookahead.peek(Token![#])
+                || lookahead.peek(Token![pub])
+            {
                 let view_struct = input.parse::<ViewStruct>()?;
                 view_structs.push(view_struct);
             } else {
@@ -149,14 +156,14 @@ impl Parse for ViewStruct {
             generics,
             items,
             attributes,
-            visibility
+            visibility,
         })
     }
 }
 
 impl Parse for FieldItem {
     fn parse(input: ParseStream) -> Result<Self> {
-        let (field_name, pattern_to_match) = parse_field_pattern(input)?;
+        let (field_name, pattern_to_match, explicit_type) = parse_field_pattern(input)?;
 
         let validation = if input.peek(Token![if]) {
             input.parse::<Token![if]>()?;
@@ -168,32 +175,47 @@ impl Parse for FieldItem {
 
         Ok(FieldItem {
             pattern_to_match,
+            explicit_type,
             validation,
             field_name,
         })
     }
 }
 
-fn parse_field_pattern(input: ParseStream) -> Result<(Ident, Option<syn::Path>)> {
+/// name, pattern, explicit type
+fn parse_field_pattern(
+    input: ParseStream,
+) -> Result<(Ident, Option<syn::Path>, Option<syn::Type>)> {
     let lookahead = input.lookahead1();
     if lookahead.peek(Ident) && (input.peek2(Paren) || input.peek2(Token![::])) {
         // Pattern like Some(field) or std::option::Option::Some(field)
         let pattern_to_match = input.parse::<syn::Path>()?;
         if input.peek(Paren) {
-            let content;
-            parenthesized!(content in input);
-            let field = content.parse::<Ident>()?;
-            Ok((field, Some(pattern_to_match)))
+            let inner;
+            parenthesized!(inner in input);
+            let field = inner.parse::<Ident>()?;
+            if inner.peek(Token![:]) {
+                inner.parse::<Token![:]>()?;
+                let inner_type = inner.parse::<syn::Type>()?;
+                return Ok((field, Some(pattern_to_match), Some(inner_type)));
+            }
+            return Ok((field, Some(pattern_to_match), None));
         } else {
-            Err(syn::Error::new(
+            return Err(syn::Error::new(
                 input.span(),
                 "Expected parentheses containing field to match on",
-            ))
+            ));
         }
     } else {
         // Simple identifier pattern
         let ident: Ident = input.parse()?;
-        Ok((ident, None))
+        let lookahead = input.lookahead1();
+        if lookahead.peek(Token![:]) {
+            input.parse::<Token![:]>()?;
+            let inner_type = input.parse::<syn::Type>()?;
+            return Ok((ident, None, Some(inner_type)));
+        }
+        return Ok((ident, None, None));
     }
 }
 
