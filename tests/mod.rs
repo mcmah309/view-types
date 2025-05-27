@@ -1,5 +1,5 @@
 mod regular {
-    use view_type::views;
+    use view_types::views;
 
     fn validate_ratio(ratio: &f32) -> bool {
         *ratio >= 0.0 && *ratio <= 1.0
@@ -94,7 +94,7 @@ mod regular {
 }
 
 mod builder {
-    use view_type::views;
+    use view_types::views;
 
     fn validate_ratio(ratio: &f32) -> bool {
         *ratio >= 0.0 && *ratio <= 1.0
