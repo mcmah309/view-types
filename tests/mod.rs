@@ -4,7 +4,7 @@ mod regular {
     #[derive(Debug)]
     enum CannotInferType {
         Branch1(String),
-        Branch2(usize)
+        Branch2(usize),
     }
 
     fn validate_ratio(ratio: &f32) -> bool {
@@ -12,36 +12,36 @@ mod regular {
     }
 
     #[views(
-    fragment all {
-        offset,
-        limit,
-        CannotInferType::Branch1(cannot_infer_type: String),
-        Ok(result1),
-        Err(result2)
-    }
-    fragment keyword {
-        Some(query),
-        words_limit: Option<usize>
-    }
-    fragment semantic {
-        Some(vector) if vector.len() == 768,
-        mut_number
-    }
-    view KeywordSearch {
-        ..all,
-        ..keyword,
-    }
-    view SemanticSearch<'a> {
-        ..all,
-        ..semantic,
-    }
-    view HybridSearch<'a> {
-        ..all,
-        ..keyword,
-        ..semantic,
-        Some(ratio  ) if validate_ratio(ratio)
-    }
-)]
+        fragment all {
+            offset,
+            limit,
+            CannotInferType::Branch1(cannot_infer_type: String),
+            Ok(result1),
+            Err(result2)
+        }
+        fragment keyword {
+            Some(query),
+            words_limit: Option<usize>
+        }
+        fragment semantic {
+            Some(vector) if vector.len() == 768,
+            mut_number
+        }
+        view KeywordSearch {
+            ..all,
+            ..keyword,
+        }
+        view SemanticSearch<'a> {
+            ..all,
+            ..semantic,
+        }
+        view HybridSearch<'a> {
+            ..all,
+            ..keyword,
+            ..semantic,
+            Some(ratio  ) if validate_ratio(ratio)
+        }
+    )]
     #[derive(Debug)]
     pub struct Search<'a> {
         query: Option<String>,
@@ -53,8 +53,8 @@ mod regular {
         mut_number: &'a mut usize,
         field_never_used: bool,
         cannot_infer_type: CannotInferType,
-        result1: Result<usize,String>,
-        result2: Result<usize,String>,
+        result1: Result<usize, String>,
+        result2: Result<usize, String>,
     }
 
     #[test]
@@ -116,33 +116,33 @@ mod builder {
     }
 
     #[views(
-    fragment all {
-        offset,
-        limit,
-    }
-    fragment keyword {
-        Some(query),
-        words_limit
-    }
-    fragment semantic {
-        Some(vector) if vector.len() == 768,
-        mut_number
-    }
-    view KeywordSearch {
-        ..all,
-        ..keyword,
-    }
-    view SemanticSearch<'a> {
-        ..all,
-        ..semantic,
-    }
-    view HybridSearch<'a> {
-        ..all,
-        ..keyword,
-        ..semantic,
-        Some(ratio) if validate_ratio(ratio)
-    }
-)]
+        fragment all {
+            offset,
+            limit,
+        }
+        fragment keyword {
+            Some(query),
+            words_limit
+        }
+        fragment semantic {
+            Some(vector) if vector.len() == 768,
+            mut_number
+        }
+        view KeywordSearch {
+            ..all,
+            ..keyword,
+        }
+        view SemanticSearch<'a> {
+            ..all,
+            ..semantic,
+        }
+        view HybridSearch<'a> {
+            ..all,
+            ..keyword,
+            ..semantic,
+            Some(ratio) if validate_ratio(ratio)
+        }
+    )]
     #[derive(bon::Builder, Debug)]
     pub struct Search<'a> {
         query: Option<String>,
