@@ -15,7 +15,9 @@ mod regular {
     fragment all {
         offset,
         limit,
-        CannotInferType::Branch1(cannot_infer_type: String)
+        CannotInferType::Branch1(cannot_infer_type: String),
+        Ok(result1),
+        Err(result2)
     }
     fragment keyword {
         Some(query),
@@ -37,7 +39,7 @@ mod regular {
         ..all,
         ..keyword,
         ..semantic,
-        Some(ratio) if validate_ratio(ratio)
+        Some(ratio  ) if validate_ratio(ratio)
     }
 )]
     #[derive(Debug)]
@@ -51,6 +53,8 @@ mod regular {
         mut_number: &'a mut usize,
         field_never_used: bool,
         cannot_infer_type: CannotInferType,
+        result1: Result<usize,String>,
+        result2: Result<usize,String>,
     }
 
     #[test]
@@ -66,7 +70,9 @@ mod regular {
             ratio: Some(0.5),
             mut_number: &mut magic_number,
             field_never_used: true,
-            cannot_infer_type: CannotInferType::Branch1("branch1".to_owned())
+            cannot_infer_type: CannotInferType::Branch1("branch1".to_owned()),
+            result1: Ok(1),
+            result2: Err("error".to_owned()),
         };
 
         let hybrid_ref: Option<HybridSearchRef<'_, '_>> = search.as_hybrid_search_ref();

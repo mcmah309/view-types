@@ -438,26 +438,56 @@ fn get_inner_type_for_pattern_match<'a>(ty: &'a Type, pattern_match: &syn::Path)
     let error = || {
         Err(syn::Error::new_spanned(
             pattern_match,
-            "Anonymous pattern deconstructing is only implemented for single generic types. The type being mapped to is ambagious. Add a type definition for the inner e.g. `EnumName::Branch(field: Type)`",
+            "Anonymous pattern deconstructing is not implemented for this type. Add a type definition for the inner e.g. `EnumName::Branch(field: Type)`",
         ))
     };
     match ty {
         syn::Type::Path(ty) => {
-            let arguments = &ty.path.segments.last().unwrap().arguments;
-            match arguments {
-                syn::PathArguments::AngleBracketed(generic_arguments) => {
-                    let mut args = generic_arguments.args.iter();
-                    let inner_generic_arg = args.next().unwrap();
-                    if args.len() != 0 {
-                        return error();
-                    }
-                    match inner_generic_arg {
-                        GenericArgument::Type(inner_type) => return Ok(inner_type),
+            let ty_last_segment = &ty.path.segments.last().unwrap();
+            let ty_last_segment_name = ty_last_segment.ident.to_string();
+            match ty_last_segment_name.as_str() {
+                "Result" => {
+                    let arguments = &ty.path.segments.last().unwrap().arguments;
+                    match arguments {
+                        syn::PathArguments::AngleBracketed(generic_arguments) => {
+                            let mut args = generic_arguments.args.iter();
+                            let ok = args.next().unwrap();
+                            let Some(err) = args.next() else {
+                                return error();
+                            };
+                            let is_ok = pattern_match.segments.last().unwrap().ident.to_string().as_str() == "Ok";
+                            let type_to_use = if is_ok {
+                                ok
+                            } else {
+                                err
+                            };
+                            match type_to_use {
+                                GenericArgument::Type(inner_type) => return Ok(inner_type),
+                                _ => return error(),
+                            };
+                        }
                         _ => return error(),
-                    };
-                }
+                    }
+                },
+                "Option" => {
+                    let arguments = &ty_last_segment.arguments;
+                    match arguments {
+                        syn::PathArguments::AngleBracketed(generic_arguments) => {
+                            let mut args = generic_arguments.args.iter();
+                            let inner_generic_arg = args.next().unwrap();
+                            if args.len() != 0 {
+                                return error();
+                            }
+                            match inner_generic_arg {
+                                GenericArgument::Type(inner_type) => return Ok(inner_type),
+                                _ => return error(),
+                            };
+                        }
+                        _ => return error(),
+                    }
+                },
                 _ => return error(),
-            }
+            };
         }
         _ => return error(),
     };
