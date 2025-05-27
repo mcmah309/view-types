@@ -21,19 +21,19 @@ mod resolve;
 ///     fragment semantic {
 ///         vector
 ///     }
-///     struct KeywordSearch {
+///     view KeywordSearch {
 ///         ..all,
 ///         ..keyword,
 ///     }
-///     struct SemanticSearch<'a> {
+///     view SemanticSearch<'a> {
 ///         ..all,
 ///         ..semantic,
 ///     }
-///     struct HybridSearch<'a> {
+///     view HybridSearch<'a> {
 ///         ..all,
 ///         ..keyword,
 ///         ..semantic,
-///         Some(ratio) = validate_ratio(ratio)
+///         Some(ratio) if validate_ratio(ratio)
 ///     }
 /// )]
 /// pub struct Search<'a> {
