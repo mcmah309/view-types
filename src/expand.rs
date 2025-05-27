@@ -16,6 +16,8 @@ pub(crate) fn expand<'a>(
         generated_code.push(view_struct);
         generated_code.push(ref_structs);
     }
+    let views_enum = generate_views_enum(original_struct, &builder.view_structs)?;
+    generated_code.push(views_enum);
 
     let conversion_impl = generate_original_conversion_methods(original_struct, &builder)?;
     generated_code.push(conversion_impl);
@@ -29,14 +31,14 @@ pub(crate) fn expand<'a>(
     })
 }
 
-fn generate_view_struct(view_structs: &ViewStructBuilder) -> syn::Result<proc_macro2::TokenStream> {
+fn generate_view_struct(view_struct: &ViewStructBuilder) -> syn::Result<proc_macro2::TokenStream> {
     let ViewStructBuilder {
         name,
         builder_fields,
         attributes,
         visibility,
         ..
-    } = view_structs;
+    } = view_struct;
 
     let mut struct_fields = Vec::new();
     for builder_field in builder_fields {
@@ -50,7 +52,7 @@ fn generate_view_struct(view_structs: &ViewStructBuilder) -> syn::Result<proc_ma
         });
     }
 
-    let generics_clause = if let Some(g) = view_structs.get_regular_generics() {
+    let generics_clause = if let Some(g) = view_struct.get_regular_generics() {
         quote! { #g }
     } else {
         quote! {}
@@ -64,9 +66,39 @@ fn generate_view_struct(view_structs: &ViewStructBuilder) -> syn::Result<proc_ma
     })
 }
 
+fn generate_views_enum(
+    original_struct: &ItemStruct,
+    view_structs: &Vec<ViewStructBuilder>,
+) -> syn::Result<proc_macro2::TokenStream> {
+    let mut branches = Vec::new();
+    for view_struct in view_structs {
+        let name = view_struct.name;
+        let ty_generics = view_struct.get_regular_generics().map(|e| {
+            let (_, ty_generics, _) = e.split_for_impl();
+            ty_generics
+        });
+        branches.push(quote! {
+            #name(#name #ty_generics)
+        });
+    }
+
+    let ItemStruct { attrs, vis, struct_token, ident, generics, fields, semi_token } = original_struct;
+
+    let mut enum_name = ident.to_string();
+    enum_name.push_str("Kind");
+    let enum_name = syn::Ident::new(enum_name.as_str(), ident.span());
+
+    Ok(quote! {
+        #(#attrs)*
+        #vis enum #enum_name #generics {
+            #(#branches,)*
+        }
+    })
+}
+
 /// Generate a reference and mutable reference structs
 fn generate_ref_view_structs_and_methods(
-    view_structs: &mut ViewStructBuilder,
+    view_struct: &mut ViewStructBuilder,
 ) -> syn::Result<proc_macro2::TokenStream> {
     // todo check this lifetime does not exist
     let all_owned_fields_additional_immutable_ref = quote! { &'original_struct };
@@ -75,7 +107,7 @@ fn generate_ref_view_structs_and_methods(
 
     let mut immutable_struct_fields = Vec::new();
     let mut mutable_struct_fields = Vec::new();
-    for builder_field in &view_structs.builder_fields {
+    for builder_field in &view_struct.builder_fields {
         // todo get any attributes from the view struct/fragment fields (we don't want to use the original)
         let vis = builder_field.vis;
         let field_name = builder_field.name;
@@ -102,22 +134,22 @@ fn generate_ref_view_structs_and_methods(
         });
     }
 
-    let ref_struct_name = format_ident!("{}Ref", view_structs.name);
-    let mut_struct_name = format_ident!("{}Mut", view_structs.name);
+    let ref_struct_name = format_ident!("{}Ref", view_struct.name);
+    let mut_struct_name = format_ident!("{}Mut", view_struct.name);
 
     // Add lifetime parameter if does not already exist and needed
     let struct_generics: Option<proc_macro2::TokenStream>;
     if uses_additional_lifetime {
-        view_structs.add_original_struct_lifetime_to_refs();
+        view_struct.add_original_struct_lifetime_to_refs();
         let (_, type_generics, where_clause) =
-            view_structs.get_ref_generics().unwrap().split_for_impl();
+            view_struct.get_ref_generics().unwrap().split_for_impl();
         struct_generics = Some(quote! { #type_generics #where_clause });
     } else {
         struct_generics = None;
     }
 
-    let attributes = view_structs.attributes;
-    let visibility = view_structs.visibility;
+    let attributes = view_struct.attributes;
+    let visibility = view_struct.visibility;
 
     Ok(quote! {
         #(#attributes)*
