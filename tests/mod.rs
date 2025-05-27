@@ -57,6 +57,132 @@ mod regular {
         result2: Result<usize, String>,
     }
 
+    pub enum SearchKind<'a> {
+        KeywordSearch(KeywordSearch),
+        SemanticSearch(SemanticSearch<'a>),
+        HybridSearch(HybridSearch<'a>),
+    }
+
+    pub enum SearchKindRef<'original_enum, 'a> {
+        KeywordSearch(KeywordSearchRef<'a>),
+        SemanticSearch(SemanticSearchRef<'original_enum, 'a>),
+        HybridSearch(HybridSearchRef<'original_enum, 'a>),
+    }
+
+    pub enum SearchKindMut<'original_enum, 'a> {
+        KeywordSearch(KeywordSearchMut<'a>),
+        SemanticSearch(SemanticSearchMut<'original_enum, 'a>),
+        HybridSearch(HybridSearchMut<'original_enum, 'a>),
+    }
+
+    impl<'original_enum: 'a, 'a> SearchKind<'a> { // * `'original_enum: 'a` is needed since `KeywordSearchRef` does not use `'a`, so `'a` of the return type is unknown?
+    // so any lifetimes unused by one of the branches needed to be added to `'original_enum: *`
+        pub fn as_ref(&'original_enum self) -> SearchKindRef<'original_enum, 'a> {
+            match self {
+                SearchKind::KeywordSearch(search) => SearchKindRef::KeywordSearch(search.as_ref()),
+                SearchKind::SemanticSearch(search) => {
+                    SearchKindRef::SemanticSearch(search.as_ref())
+                }
+                SearchKind::HybridSearch(search) => SearchKindRef::HybridSearch(search.as_ref()),
+            }
+        }
+
+        pub fn as_mut(&'original_enum mut self) -> SearchKindMut<'original_enum, 'a> {
+            match self {
+                SearchKind::KeywordSearch(search) => SearchKindMut::KeywordSearch(search.as_mut()),
+                SearchKind::SemanticSearch(search) => {
+                    SearchKindMut::SemanticSearch(search.as_mut())
+                }
+                SearchKind::HybridSearch(search) => SearchKindMut::HybridSearch(search.as_mut()),
+            }
+        }
+    }
+
+    //************************************************************************//
+    impl<'original_enum> KeywordSearch {
+        pub fn as_ref(&'original_enum self) -> KeywordSearchRef<'original_enum> {
+            KeywordSearchRef {
+                query: &self.query,
+                offset: &self.offset,
+                limit: &self.limit,
+                words_limit: &self.words_limit,
+                cannot_infer_type: &self.cannot_infer_type,
+                result1: &self.result1,
+                result2: &self.result2,
+            }
+        }
+
+        pub fn as_mut(&'original_enum mut self) -> KeywordSearchMut<'original_enum> {
+            KeywordSearchMut {
+                query: &mut self.query,
+                offset: &mut self.offset,
+                limit: &mut self.limit,
+                words_limit: &mut self.words_limit,
+                cannot_infer_type: &mut self.cannot_infer_type,
+                result1: &mut self.result1,
+                result2: &mut self.result2,
+            }
+        }
+    }
+
+    impl<'original_enum, 'a> SemanticSearch<'a> {
+        pub fn as_ref(&'original_enum self) -> SemanticSearchRef<'original_enum, 'a> {
+            SemanticSearchRef {
+                vector: self.vector,
+                mut_number: self.mut_number,
+                offset: &self.offset,
+                limit: &self.limit,
+                cannot_infer_type: &self.cannot_infer_type,
+                result1: &self.result1,
+                result2: &self.result2,
+            }
+        }
+
+        pub fn as_mut(&'original_enum mut self) -> SemanticSearchMut<'original_enum, 'a> {
+            SemanticSearchMut {
+                vector: self.vector,
+                mut_number: self.mut_number,
+                offset: &mut self.offset,
+                limit: &mut self.limit,
+                cannot_infer_type: &mut self.cannot_infer_type,
+                result1: &mut self.result1,
+                result2: &mut self.result2,
+            }
+        }
+    }
+
+    impl<'original_enum, 'a> HybridSearch<'a> {
+        pub fn as_ref(&'original_enum self) -> HybridSearchRef<'original_enum, 'a> {
+            HybridSearchRef {
+                query: &self.query,
+                offset: &self.offset,
+                limit: &self.limit,
+                words_limit: &self.words_limit,
+                vector: self.vector,
+                ratio: &self.ratio,
+                mut_number: &self.mut_number,
+                cannot_infer_type: &self.cannot_infer_type,
+                result1: &self.result1,
+                result2: &self.result2,
+            }
+        }
+
+        pub fn as_mut(&'original_enum mut self) -> HybridSearchMut<'original_enum, 'a> {
+            HybridSearchMut {
+                query: &mut self.query,
+                offset: &mut self.offset,
+                limit: &mut self.limit,
+                words_limit: &mut self.words_limit,
+                vector: self.vector,
+                ratio: &mut self.ratio,
+                mut_number: self.mut_number,
+                cannot_infer_type: &mut self.cannot_infer_type,
+                result1: &mut self.result1,
+                result2: &mut self.result2,
+            }
+        }
+    }
+
     #[test]
     fn test() {
         let mut magic_number = 1;
