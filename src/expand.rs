@@ -85,7 +85,7 @@ fn generate_views_enum(
     let ItemStruct { attrs, vis, struct_token, ident, generics, fields, semi_token } = original_struct;
 
     let mut enum_name = ident.to_string();
-    enum_name.push_str("Kind");
+    enum_name.push_str("Variant");
     let enum_name = syn::Ident::new(enum_name.as_str(), ident.span());
 
     let attrs = &builder.enum_attributes;

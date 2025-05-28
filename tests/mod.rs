@@ -51,7 +51,7 @@ mod regular {
             Some(ratio  ) if validate_ratio(ratio)
         }
     )]
-    #[Kind(
+    #[Variant(
         #[derive(Debug)]
     )]
     #[derive(Debug)]

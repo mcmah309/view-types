@@ -57,7 +57,7 @@ fn views_impl(args: proc_macro::TokenStream, input: proc_macro::TokenStream) -> 
     let view_spec = syn::parse::<Views>(args.into())?;
     
     let mut original_struct = syn::parse::<ItemStruct>(input.into())?;
-    let enum_attributes = crate::parse::extract_nested_attributes("Kind", &mut original_struct.attrs)?;
+    let enum_attributes = crate::parse::extract_nested_attributes("Variant", &mut original_struct.attrs)?;
     let resolution = resolve::resolve(&original_struct, &view_spec, enum_attributes)?;
     
     let generated_code = expand::expand(&original_struct, resolution)?;
