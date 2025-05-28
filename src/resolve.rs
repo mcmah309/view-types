@@ -1,28 +1,14 @@
 use std::collections::{HashMap, HashSet};
 use syn::{
-    Error, Expr, Field, GenericArgument, Generics, Ident, ItemStruct, Lifetime, Type, Visibility,
+    Attribute, Error, Expr, Field, GenericArgument, Generics, Ident, ItemStruct, Lifetime, Type, Visibility
 };
 
 use crate::parse::{ViewStructFieldKind, Views};
 
 pub(crate) struct Builder<'a> {
     pub view_structs: Vec<ViewStructBuilder<'a>>,
-    // todo
-    // /// view structs that are subsets of other view structs, thus can be converted between
-    // sub_structs: HashMap<usize,usize>,
+    pub enum_attributes: Vec<Attribute>,
 }
-
-// /// Check if target view is a subset of source view
-// fn is_view_subset(target_view: &ResolvedViewStruct, source_view: &ResolvedViewStruct) -> bool {
-//     let source_field_names: HashSet<String> = source_view.builder_fields
-//         .iter()
-//         .map(|f| f.source_view_field_name.to_string())
-//         .collect();
-
-//     target_view.builder_fields.iter().all(|target_field| {
-//         source_field_names.contains(&target_field.source_view_field_name.to_string())
-//     })
-// }
 
 #[derive(Debug)]
 pub(crate) struct ViewStructBuilder<'a> {
@@ -35,6 +21,8 @@ pub(crate) struct ViewStructBuilder<'a> {
     ref_generics: Option<syn::Generics>,
     /// Generics that are used in the regular view struct
     regular_generics: Option<syn::Generics>,
+    pub ref_attributes: &'a Vec<Attribute>,
+    pub mut_attributes: &'a Vec<Attribute>
 }
 
 impl<'a> ViewStructBuilder<'a> {
@@ -44,6 +32,8 @@ impl<'a> ViewStructBuilder<'a> {
         builder_fields: Vec<BuilderViewField<'a>>,
         attributes: &'a Vec<syn::Attribute>,
         visibility: &'a Option<Visibility>,
+        ref_attributes: &'a Vec<Attribute>,
+        mut_attributes: &'a Vec<Attribute>,
     ) -> Self {
         Self {
             name,
@@ -53,6 +43,8 @@ impl<'a> ViewStructBuilder<'a> {
             visibility,
             ref_generics: None,
             regular_generics: None,
+            ref_attributes,
+            mut_attributes,
         }
     }
 
@@ -181,16 +173,19 @@ impl<'a> BuilderViewField<'a> {
 /// Resolves the references to fragments and fields
 pub(crate) fn resolve<'a>(
     original_struct: &'a syn::ItemStruct,
-    view_spec: &'a Views,
+    views: &'a Views,
+    enum_attributes: Vec<Attribute>,
 ) -> syn::Result<Builder<'a>> {
     validate_original_struct(original_struct)?;
-    validate_unique_fields(view_spec)?;
+    validate_unique_fields(views)?;
 
     let original_struct_fields = extract_original_fields(&original_struct)?;
 
-    let builder_view_structs = resolve_field_references(view_spec, &original_struct_fields)?;
+    let builder_view_structs = resolve_field_references(views, &original_struct_fields)?;
+
     Ok(Builder {
         view_structs: builder_view_structs,
+        enum_attributes,
     })
 }
 
@@ -384,6 +379,8 @@ fn resolve_field_references<'a, 'b>(
             builder_fields,
             &view_struct.attributes,
             &view_struct.visibility,
+            &view_struct.ref_attributes,
+            &view_struct.mut_attributes,
         );
 
         if struct_builder.builder_fields.iter().any(|e| e.is_ref) {

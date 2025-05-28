@@ -27,20 +27,32 @@ mod regular {
             Some(vector) if vector.len() == 768,
             mut_number
         }
-        view KeywordSearch {
+        #[derive(Debug)]
+        pub view KeywordSearch {
             ..all,
             ..keyword,
         }
-        view SemanticSearch<'a> {
+        #[derive(Debug)]
+        pub view SemanticSearch<'a> {
             ..all,
             ..semantic,
         }
-        view HybridSearch<'a> {
+        #[derive(Debug)]
+        #[Ref(
+            #[derive(Clone)]
+        )]
+        #[Mut(
+            #[derive(Debug)]
+        )]
+        pub view HybridSearch<'a> {
             ..all,
             ..keyword,
             ..semantic,
             Some(ratio  ) if validate_ratio(ratio)
         }
+    )]
+    #[Kind(
+        #[derive(Debug)]
     )]
     #[derive(Debug)]
     pub struct Search<'a> {
@@ -57,48 +69,6 @@ mod regular {
         result2: Result<usize, String>,
     }
 
-    pub enum SearchKind<'a> {
-        KeywordSearch(KeywordSearch),
-        SemanticSearch(SemanticSearch<'a>),
-        HybridSearch(HybridSearch<'a>),
-    }
-
-    pub enum SearchKindRef<'original_enum, 'a> {
-        KeywordSearch(KeywordSearchRef<'a>),
-        SemanticSearch(SemanticSearchRef<'original_enum, 'a>),
-        HybridSearch(HybridSearchRef<'original_enum, 'a>),
-    }
-
-    pub enum SearchKindMut<'original_enum, 'a> {
-        KeywordSearch(KeywordSearchMut<'a>),
-        SemanticSearch(SemanticSearchMut<'original_enum, 'a>),
-        HybridSearch(HybridSearchMut<'original_enum, 'a>),
-    }
-
-    impl<'original_enum: 'a, 'a> SearchKind<'a> { // * `'original_enum: 'a` is needed since `KeywordSearchRef` does not use `'a`, so `'a` of the return type is unknown?
-    // so any lifetimes unused by one of the branches needed to be added to `'original_enum: *`
-        pub fn as_ref(&'original_enum self) -> SearchKindRef<'original_enum, 'a> {
-            match self {
-                SearchKind::KeywordSearch(search) => SearchKindRef::KeywordSearch(search.as_ref()),
-                SearchKind::SemanticSearch(search) => {
-                    SearchKindRef::SemanticSearch(search.as_ref())
-                }
-                SearchKind::HybridSearch(search) => SearchKindRef::HybridSearch(search.as_ref()),
-            }
-        }
-
-        pub fn as_mut(&'original_enum mut self) -> SearchKindMut<'original_enum, 'a> {
-            match self {
-                SearchKind::KeywordSearch(search) => SearchKindMut::KeywordSearch(search.as_mut()),
-                SearchKind::SemanticSearch(search) => {
-                    SearchKindMut::SemanticSearch(search.as_mut())
-                }
-                SearchKind::HybridSearch(search) => SearchKindMut::HybridSearch(search.as_mut()),
-            }
-        }
-    }
-
-    //************************************************************************//
     impl<'original_enum> KeywordSearch {
         pub fn as_ref(&'original_enum self) -> KeywordSearchRef<'original_enum> {
             KeywordSearchRef {

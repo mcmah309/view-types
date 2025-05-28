@@ -1,14 +1,12 @@
 use syn::{
-    Expr, Ident, Token, Visibility, braced, parenthesized,
-    parse::{Parse, ParseStream, Result},
-    token::Paren,
+    braced, parenthesized, parse::{Parse, ParseStream, Result}, token::Paren, Attribute, Expr, Ident, Token, Visibility
 };
 
 /// Top-level view specification with fragments and structs
 #[derive(Debug)]
 pub(crate) struct Views {
     pub fragments: Vec<Fragment>,
-    pub view_structs: Vec<ViewStruct>,
+    pub view_structs: Vec<ViewStruct>
 }
 
 #[derive(Debug)]
@@ -23,6 +21,8 @@ pub(crate) struct ViewStruct {
     pub generics: Option<syn::Generics>,
     pub items: Vec<ViewStructFieldKind>,
     pub attributes: Vec<syn::Attribute>,
+    pub ref_attributes: Vec<syn::Attribute>,
+    pub mut_attributes: Vec<syn::Attribute>,
     pub visibility: Option<Visibility>,
 }
 
@@ -123,7 +123,9 @@ impl Parse for Fragment {
 
 impl Parse for ViewStruct {
     fn parse(input: ParseStream) -> Result<Self> {
-        let attributes = input.call(syn::Attribute::parse_outer)?;
+        let mut attributes = input.call(syn::Attribute::parse_outer)?;
+        let ref_attributes = extract_nested_attributes("Ref", &mut attributes)?;
+        let mut_attributes = extract_nested_attributes("Mut", &mut attributes)?;
         let visibility = input.parse::<Visibility>().ok();
         let ty = input.parse::<Ident>()?;
         if ty.to_string().as_str() != "view" {
@@ -168,6 +170,8 @@ impl Parse for ViewStruct {
             generics,
             items,
             attributes,
+            ref_attributes,
+            mut_attributes,
             visibility,
         })
     }
@@ -230,6 +234,62 @@ fn parse_field_pattern(
         return Ok((ident, None, None));
     }
 }
+
+/// Extracts nested attributes for auto generated. e.g.
+/// ```rust
+/// #[Ref(
+///     #[derive(Debug,Clone)]
+/// )]
+/// ```
+pub(crate) fn extract_nested_attributes(
+    identifier: &'static str,
+    attributes: &mut Vec<Attribute>,
+) -> syn::Result<Vec<Attribute>> {
+    let mut to_remove = Vec::new();
+    let mut inner_attributes = Vec::new();
+    for (i, attribute) in attributes.iter().enumerate() {
+        match &attribute.meta {
+            syn::Meta::Path(_) => {},
+            syn::Meta::NameValue(_) => {},
+            syn::Meta::List(list) => {
+                let ident = list.path.get_ident();
+                let Some(ident) = ident else {
+                    continue;
+                };
+                let ident = ident.to_string();
+                if ident.as_str() != identifier {
+                    continue;   
+                }
+                to_remove.push(i);
+                let attributes: Attributes = syn::parse2(list.tokens.clone())?;
+                inner_attributes.extend(attributes.attributes);
+            }
+        }
+    }
+    if to_remove.is_empty() {
+        return Ok(inner_attributes);
+    }
+    let mut index = 0;
+    attributes.retain(|_| {
+        let retain = !&to_remove.contains(&index);
+        index += 1;
+        return retain;
+    });
+    Ok(inner_attributes)
+}
+
+#[derive(Debug)]
+struct Attributes {
+    pub attributes: Vec<Attribute>,
+}
+
+impl Parse for Attributes {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let attributes = Attribute::parse_outer(input)?;
+        Ok(Attributes { attributes })
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

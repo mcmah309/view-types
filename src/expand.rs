@@ -16,7 +16,7 @@ pub(crate) fn expand<'a>(
         generated_code.push(view_struct);
         generated_code.push(ref_structs);
     }
-    let views_enum = generate_views_enum(original_struct, &builder.view_structs)?;
+    let views_enum = generate_views_enum(original_struct, &builder)?;
     generated_code.push(views_enum);
 
     let conversion_impl = generate_original_conversion_methods(original_struct, &builder)?;
@@ -68,10 +68,10 @@ fn generate_view_struct(view_struct: &ViewStructBuilder) -> syn::Result<proc_mac
 
 fn generate_views_enum(
     original_struct: &ItemStruct,
-    view_structs: &Vec<ViewStructBuilder>,
+    builder: &Builder<'_>
 ) -> syn::Result<proc_macro2::TokenStream> {
     let mut branches = Vec::new();
-    for view_struct in view_structs {
+    for view_struct in &builder.view_structs {
         let name = view_struct.name;
         let ty_generics = view_struct.get_regular_generics().map(|e| {
             let (_, ty_generics, _) = e.split_for_impl();
@@ -87,6 +87,8 @@ fn generate_views_enum(
     let mut enum_name = ident.to_string();
     enum_name.push_str("Kind");
     let enum_name = syn::Ident::new(enum_name.as_str(), ident.span());
+
+    let attrs = &builder.enum_attributes;
 
     Ok(quote! {
         #(#attrs)*
@@ -148,16 +150,17 @@ fn generate_ref_view_structs_and_methods(
         struct_generics = None;
     }
 
-    let attributes = view_struct.attributes;
+    let ref_attributes = view_struct.ref_attributes;
+    let mut_attributes = view_struct.mut_attributes;
     let visibility = view_struct.visibility;
 
     Ok(quote! {
-        #(#attributes)*
+        #(#ref_attributes)*
         #visibility struct #ref_struct_name #struct_generics {
             #(#immutable_struct_fields,)*
         }
 
-        #(#attributes)*
+        #(#mut_attributes)*
         #visibility struct #mut_struct_name #struct_generics {
             #(#mutable_struct_fields,)*
         }
