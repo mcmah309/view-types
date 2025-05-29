@@ -136,9 +136,13 @@ impl Parse for ViewStruct {
         }
         let name: Ident = input.parse()?;
 
-        // Parse optional generics
         let generics = if input.peek(Token![<]) {
-            Some(input.parse::<syn::Generics>()?)
+            let generics = input.parse::<syn::Generics>()?;
+            let where_clause = input.parse::<Option<syn::WhereClause>>()?;
+            Some(syn::Generics {
+                where_clause,
+                ..generics
+            })
         } else {
             None
         };

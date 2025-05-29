@@ -33,7 +33,7 @@ mod regular {
             ..keyword,
         }
         #[derive(Debug)]
-        pub view SemanticSearch<'a> {
+        pub view SemanticSearch<'a> where 'a: 'a {
             ..all,
             ..semantic,
             semantic_only_ref
@@ -56,7 +56,7 @@ mod regular {
         #[derive(Debug)]
     )]
     #[derive(Debug)]
-    pub struct Search<'a> {
+    pub struct Search<'a> where 'a: 'a {
         query: Option<String>,
         offset: usize,
         limit: usize,

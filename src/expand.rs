@@ -48,7 +48,8 @@ fn generate_view_struct(view_struct: &ViewStructBuilder) -> syn::Result<proc_mac
     }
 
     let generics_clause = if let Some(g) = view_struct.get_regular_generics() {
-        quote! { #g }
+        let (_, ty_generics, where_generics) = g.split_for_impl();
+        quote! { #ty_generics #where_generics }
     } else {
         quote! {}
     };
