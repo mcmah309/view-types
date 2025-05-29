@@ -22,10 +22,6 @@ pub(crate) fn expand<'a>(
     let conversion_impl = generate_original_conversion_methods(original_struct, &builder)?;
     generated_code.push(conversion_impl);
 
-    // todo
-    // let inter_view_conversions = generate_inter_view_conversions(&context)?;
-    // generated_code.extend(inter_view_conversions);
-
     Ok(quote! {
         #(#generated_code)*
     })
@@ -42,7 +38,6 @@ fn generate_view_struct(view_struct: &ViewStructBuilder) -> syn::Result<proc_mac
 
     let mut struct_fields = Vec::new();
     for builder_field in builder_fields {
-        // todo get any attributes from the view struct/fragment fields (we don't want to use the original)
         let vis = builder_field.vis;
         let field_name = builder_field.name;
         let ty = &builder_field.this_regular_struct_field_type;
@@ -68,7 +63,7 @@ fn generate_view_struct(view_struct: &ViewStructBuilder) -> syn::Result<proc_mac
 
 fn generate_views_enum(
     original_struct: &ItemStruct,
-    builder: &Builder<'_>
+    builder: &Builder<'_>,
 ) -> syn::Result<proc_macro2::TokenStream> {
     let mut branches = Vec::new();
     for view_struct in &builder.view_structs {
@@ -82,7 +77,15 @@ fn generate_views_enum(
         });
     }
 
-    let ItemStruct { attrs, vis, struct_token, ident, generics, fields, semi_token } = original_struct;
+    let ItemStruct {
+        attrs: _,
+        vis,
+        struct_token: _,
+        ident,
+        generics,
+        fields: _,
+        semi_token: _,
+    } = original_struct;
 
     let mut enum_name = ident.to_string();
     enum_name.push_str("Variant");
@@ -103,14 +106,13 @@ fn generate_ref_view_structs_and_methods(
     view_struct: &mut ViewStructBuilder,
 ) -> syn::Result<proc_macro2::TokenStream> {
     // todo check this lifetime does not exist
-    let all_owned_fields_additional_immutable_ref = quote! { &'original_struct };
-    let all_owned_fields_additional_mutable_ref = quote! { &'original_struct mut};
+    let all_owned_fields_additional_immutable_ref = quote! { &'original };
+    let all_owned_fields_additional_mutable_ref = quote! { &'original mut};
     let mut uses_additional_lifetime = false;
 
     let mut immutable_struct_fields = Vec::new();
     let mut mutable_struct_fields = Vec::new();
     for builder_field in &view_struct.builder_fields {
-        // todo get any attributes from the view struct/fragment fields (we don't want to use the original)
         let vis = builder_field.vis;
         let field_name = builder_field.name;
         let ref_ty = &builder_field.this_ref_struct_field_type;
@@ -178,7 +180,7 @@ fn generate_original_conversion_methods(
     let mut generics_with_new_lifetime = original_generics.clone();
     generics_with_new_lifetime
         .params
-        .insert(0, syn::parse_quote!('original_struct));
+        .insert(0, syn::parse_quote!('original));
     let (impl_generics, _, _) = generics_with_new_lifetime.split_for_impl();
 
     let mut methods = Vec::new();
@@ -278,11 +280,11 @@ fn generate_original_conversion_methods(
                 #into_body
             }
 
-            pub fn #as_ref_method(&'original_struct self) -> #ref_return_type {
+            pub fn #as_ref_method(&'original self) -> #ref_return_type {
                 #ref_body
             }
 
-            pub fn #as_mut_method(&'original_struct mut self) -> #mut_return_type {
+            pub fn #as_mut_method(&'original mut self) -> #mut_return_type {
                 #mut_body
             }
         });

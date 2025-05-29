@@ -52,7 +52,7 @@ impl<'a> ViewStructBuilder<'a> {
         if self.ref_generics.is_some() {
             return;
         }
-        let new_lifetime = syn::parse_quote!('original_struct);
+        let new_lifetime = syn::parse_quote!('original);
         if let Some(original_generics) = &self.original_generics {
             let mut new_generics = original_generics.clone();
             new_generics.params.insert(0, new_lifetime);
@@ -68,7 +68,7 @@ impl<'a> ViewStructBuilder<'a> {
     //     if self.regular_generics.is_some() {
     //         return;
     //     }
-    //     let new_lifetime = syn::parse_quote!('original_struct);
+    //     let new_lifetime = syn::parse_quote!('original);
     //     if let Some(original_generics) = &self.original_generics {
     //         let mut new_generics = original_generics.clone();
     //         new_generics.params.insert(0, new_lifetime);
@@ -142,7 +142,7 @@ impl<'a> BuilderViewField<'a> {
             }
         }
         let (is_ref_inner, type_changes) =
-            change_mut_and_lifetimes_if_ref(&this_regular_struct_field_type);
+            get_new_types_if_reference_type(&this_regular_struct_field_type);
         is_ref = is_ref_inner;
         is_refs_and_original_struct_lifetime = type_changes.is_some();
         if let Some((ref_type, mut_type)) = type_changes {
@@ -393,15 +393,16 @@ fn resolve_field_references<'a, 'b>(
     Ok(builder_view_structs)
 }
 
-// todo make recursive?
-/// mut lifetimes need to become `'original_struct`, since otherwise it would imply the possibility to have two mutable references.
-/// and ref cannot take a mut, because the original struct will be borrowed as `&`
-/// returns the new type for (is_ref, (ref, mut))
-fn change_mut_and_lifetimes_if_ref(ty: &syn::Type) -> (bool, Option<(syn::Type, syn::Type)>) {
+/// Outer references may need to change.
+/// Mut lifetimes need to become `'original`, since otherwise it would imply the possibility of
+/// having two mutable references.
+/// And for ref, all refs need to immutable, because the original struct will be borrowed as `&`.
+/// Returns the new type for (is_ref, (ref, mut))
+fn get_new_types_if_reference_type(ty: &syn::Type) -> (bool, Option<(syn::Type, syn::Type)>) {
     match ty {
         syn::Type::Reference(reference) => {
             if reference.mutability.is_some() {
-                let lifetime: Lifetime = syn::parse_quote!('original_struct);
+                let lifetime: Lifetime = syn::parse_quote!('original);
                 (
                     true,
                     Some((
