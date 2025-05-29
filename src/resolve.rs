@@ -64,22 +64,6 @@ impl<'a> ViewStructBuilder<'a> {
         }
     }
 
-    // pub fn add_original_struct_lifetime_to_regular(&mut self) {
-    //     if self.regular_generics.is_some() {
-    //         return;
-    //     }
-    //     let new_lifetime = syn::parse_quote!('original);
-    //     if let Some(original_generics) = &self.original_generics {
-    //         let mut new_generics = original_generics.clone();
-    //         new_generics.params.insert(0, new_lifetime);
-    //         self.regular_generics = Some(new_generics);
-    //     } else {
-    //         let mut generics = Generics::default();
-    //         generics.params.push(new_lifetime);
-    //         self.regular_generics = Some(generics);
-    //     }
-    // }
-
     pub fn get_ref_generics(&self) -> Option<&syn::Generics> {
         if let Some(generics) = &self.ref_generics {
             return Some(generics);
@@ -394,10 +378,13 @@ fn resolve_field_references<'a, 'b>(
 }
 
 /// Outer references may need to change.
-/// Lifetimes need to become `'original`, since otherwise it would imply the possibility of having two mutable references,
-/// and `as_*_mut/ref` methods would need `'original: *` (original to live at least as long as all inner lifetimes).
+/// Mut lifetimes need to become `'original`, since otherwise it would imply the possibility of having two mutable references,
+/// and `as_*_mut` methods would need `'original: *` (original to live at least as long as all inner lifetimes).
 /// And for ref, all refs need to immutable, because the original struct will be borrowed as `&`.
-/// Returns the new type for (is_ref, (ref, mut))
+/// # Returns
+/// (is_ref, (ref, mut))
+/// * `is_ref` - whether the type is a reference type
+/// * `(ref, mut)` - the new types if it is a reference type for `Ref` and `Mut` types
 fn get_new_types_if_reference_type(ty: &syn::Type) -> (bool, Option<(syn::Type, syn::Type)>) {
     match ty {
         syn::Type::Reference(reference) => {
@@ -408,7 +395,7 @@ fn get_new_types_if_reference_type(ty: &syn::Type) -> (bool, Option<(syn::Type, 
                     Some((
                         syn::Type::Reference(syn::TypeReference {
                             and_token: reference.and_token.clone(),
-                            lifetime: Some(lifetime.clone()), // todo we should change this to ` reference.lifetime.clone()`, but then the `as_*_ref` methods need additional bounds `('original: 'a`)
+                            lifetime: Some(lifetime.clone()),
                             mutability: None,
                             elem: Box::new(reference.elem.as_ref().clone()),
                         }),

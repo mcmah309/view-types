@@ -240,7 +240,7 @@ fn parse_field_pattern(
 }
 
 /// Extracts nested attributes for auto generated. e.g.
-/// ```rust
+/// ```ignore
 /// #[Ref(
 ///     #[derive(Debug,Clone)]
 /// )]
@@ -355,7 +355,7 @@ mod tests {
     #[test]
     fn test_parse_view_struct() {
         let input = parse_quote! {
-            struct KeywordSearch<'a> {
+            view KeywordSearch<'a> {
                 ..all,
                 ..keyword,
                 custom_field
@@ -379,7 +379,7 @@ mod tests {
     fn test_parse_fragment_with_validations() {
         let input = parse_quote! {
             fragment semantic {
-                Some(semantic) = valid_semantic_value(semantic),
+                Some(semantic) if valid_semantic_value(semantic),
                 Some(query)
             }
         };
@@ -401,11 +401,11 @@ mod tests {
                 Some(query),
                 words_limit
             }
-            struct KeywordSearch<'a> {
+            view KeywordSearch<'a> {
                 ..all,
                 ..keyword
             }
-            struct SemanticSearch {
+            view SemanticSearch {
                 ..all,
                 semantic_field
             }
@@ -426,7 +426,7 @@ mod tests {
             fragment keyword {
                 Some(query)
             }
-            struct KeywordSearch {
+            view KeywordSearch {
                 ..all,
                 ..keyword,
                 custom_field

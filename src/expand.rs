@@ -11,7 +11,7 @@ pub(crate) fn expand<'a>(
 
     for view_structs in &mut builder.view_structs {
         let view_struct = generate_view_struct(view_structs)?;
-        let ref_structs = generate_ref_view_structs_and_methods(view_structs)?;
+        let ref_structs = generate_ref_view_structs_and_methods(view_structs)?; // Note: This mutates, order matters
 
         generated_code.push(view_struct);
         generated_code.push(ref_structs);
@@ -113,6 +113,8 @@ fn generate_ref_view_structs_and_methods(
 
     let mut immutable_struct_fields = Vec::new();
     let mut mutable_struct_fields = Vec::new();
+    let mut immutable_struct_method_fields = Vec::new();
+    let mut mutable_struct_method_fields = Vec::new();
     for builder_field in &view_struct.builder_fields {
         let vis = builder_field.vis;
         let field_name = builder_field.name;
@@ -132,10 +134,16 @@ fn generate_ref_view_structs_and_methods(
         };
 
         immutable_struct_fields.push(quote! {
-            #vis #field_name : #additional_immutable_ref #ref_ty
+            #vis #field_name: #additional_immutable_ref #ref_ty
         });
         mutable_struct_fields.push(quote! {
-            #vis #field_name : #additional_mutable_ref #mut_ty
+            #vis #field_name: #additional_mutable_ref #mut_ty
+        });
+        immutable_struct_method_fields.push(quote! {
+            #field_name: &self.#field_name
+        });
+        mutable_struct_method_fields.push(quote! {
+            #field_name: &mut self.#field_name
         });
     }
 
@@ -143,29 +151,53 @@ fn generate_ref_view_structs_and_methods(
     let mut_struct_name = format_ident!("{}Mut", view_struct.name);
 
     // Add lifetime parameter if does not already exist and needed
-    let struct_generics: Option<proc_macro2::TokenStream>;
-    if uses_additional_lifetime {
+    let (ref_impl_generics, ref_type_generics, ref_where_clause) = if uses_additional_lifetime {
         view_struct.add_original_struct_lifetime_to_refs();
-        let (_, type_generics, where_clause) =
-            view_struct.get_ref_generics().unwrap().split_for_impl();
-        struct_generics = Some(quote! { #type_generics #where_clause });
+        let (impl_generics, type_generics, where_clause) = view_struct
+            .get_ref_generics()
+            .expect("If refs use an additional lifetime, then it must have had this generic added")
+            .split_for_impl();
+        (Some(impl_generics), Some(type_generics), Some(where_clause))
     } else {
-        struct_generics = None;
-    }
+        (None, None, None)
+    };
 
     let ref_attributes = view_struct.ref_attributes;
     let mut_attributes = view_struct.mut_attributes;
     let visibility = view_struct.visibility;
 
+    let (_regular_impl_generics, regular_type_generics, regular_where_clause) =
+        if let Some(generics) = view_struct.get_regular_generics() {
+            let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
+            (Some(impl_generics), Some(type_generics), Some(where_clause))
+        } else {
+            (None, None, None)
+        };
+    let struct_name = &view_struct.name;
+
     Ok(quote! {
         #(#ref_attributes)*
-        #visibility struct #ref_struct_name #struct_generics {
+        #visibility struct #ref_struct_name #ref_type_generics #ref_where_clause {
             #(#immutable_struct_fields,)*
         }
 
         #(#mut_attributes)*
-        #visibility struct #mut_struct_name #struct_generics {
+        #visibility struct #mut_struct_name #ref_type_generics #ref_where_clause {
             #(#mutable_struct_fields,)*
+        }
+
+        impl #ref_impl_generics #struct_name #regular_type_generics #regular_where_clause {
+            pub fn as_ref(&'original self) -> #ref_struct_name #ref_type_generics {
+                #ref_struct_name {
+                    #(#immutable_struct_method_fields,)*
+                }
+            }
+
+            pub fn as_mut(&'original mut self) -> #mut_struct_name #ref_type_generics {
+                #mut_struct_name {
+                    #(#mutable_struct_method_fields,)*
+                }
+            }
         }
     })
 }

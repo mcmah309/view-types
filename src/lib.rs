@@ -9,6 +9,12 @@ mod resolve;
 /// 
 /// # Example
 /// ```rust
+/// use view_types::views;
+/// 
+/// fn validate_ratio(ratio: &f32) -> bool {
+///     (*ratio >= 0.0 && *ratio <= 1.0)
+/// }
+/// 
 /// #[views(
 ///     fragment all {
 ///         offset,
@@ -21,15 +27,15 @@ mod resolve;
 ///     fragment semantic {
 ///         vector
 ///     }
-///     view KeywordSearch {
+///     pub view KeywordSearch {
 ///         ..all,
 ///         ..keyword,
 ///     }
-///     view SemanticSearch<'a> {
+///     pub view SemanticSearch<'a> {
 ///         ..all,
 ///         ..semantic,
 ///     }
-///     view HybridSearch<'a> {
+///     pub view HybridSearch<'a> {
 ///         ..all,
 ///         ..keyword,
 ///         ..semantic,

@@ -27,7 +27,7 @@ mod regular {
             Some(vector) if vector.len() == 768,
             mut_number
         }
-        #[derive(Debug)]
+        #[derive(Debug,Clone)]
         pub view KeywordSearch {
             ..all,
             ..keyword,
@@ -69,92 +69,6 @@ mod regular {
         cannot_infer_type: CannotInferType,
         result1: Result<usize, String>,
         result2: Result<usize, String>,
-    }
-
-    impl<'original_enum> KeywordSearch {
-        pub fn as_ref(&'original_enum self) -> KeywordSearchRef<'original_enum> {
-            KeywordSearchRef {
-                query: &self.query,
-                offset: &self.offset,
-                limit: &self.limit,
-                words_limit: &self.words_limit,
-                cannot_infer_type: &self.cannot_infer_type,
-                result1: &self.result1,
-                result2: &self.result2,
-            }
-        }
-
-        pub fn as_mut(&'original_enum mut self) -> KeywordSearchMut<'original_enum> {
-            KeywordSearchMut {
-                query: &mut self.query,
-                offset: &mut self.offset,
-                limit: &mut self.limit,
-                words_limit: &mut self.words_limit,
-                cannot_infer_type: &mut self.cannot_infer_type,
-                result1: &mut self.result1,
-                result2: &mut self.result2,
-            }
-        }
-    }
-
-    impl<'original_enum, 'a> SemanticSearch<'a> {
-        pub fn as_ref(&'original_enum self) -> SemanticSearchRef<'original_enum, 'a> {
-            SemanticSearchRef {
-                vector: &self.vector,
-                mut_number: &self.mut_number,
-                semantic_only_ref: &self.semantic_only_ref,
-                offset: &self.offset,
-                limit: &self.limit,
-                cannot_infer_type: &self.cannot_infer_type,
-                result1: &self.result1,
-                result2: &self.result2,
-            }
-        }
-
-        pub fn as_mut(&'original_enum mut self) -> SemanticSearchMut<'original_enum, 'a> {
-            SemanticSearchMut {
-                vector: &mut self.vector,
-                mut_number: &mut self.mut_number,
-                semantic_only_ref: &mut self.semantic_only_ref,
-                offset: &mut self.offset,
-                limit: &mut self.limit,
-                cannot_infer_type: &mut self.cannot_infer_type,
-                result1: &mut self.result1,
-                result2: &mut self.result2,
-            }
-        }
-    }
-
-    impl<'original_enum, 'a> HybridSearch<'a> {
-        pub fn as_ref(&'original_enum self) -> HybridSearchRef<'original_enum, 'a> {
-            HybridSearchRef {
-                query: &self.query,
-                offset: &self.offset,
-                limit: &self.limit,
-                words_limit: &self.words_limit,
-                vector: self.vector,
-                ratio: &self.ratio,
-                mut_number: &self.mut_number,
-                cannot_infer_type: &self.cannot_infer_type,
-                result1: &self.result1,
-                result2: &self.result2,
-            }
-        }
-
-        pub fn as_mut(&'original_enum mut self) -> HybridSearchMut<'original_enum, 'a> {
-            HybridSearchMut {
-                query: &mut self.query,
-                offset: &mut self.offset,
-                limit: &mut self.limit,
-                words_limit: &mut self.words_limit,
-                vector: &mut self.vector,
-                ratio: &mut self.ratio,
-                mut_number: &mut self.mut_number,
-                cannot_infer_type: &mut self.cannot_infer_type,
-                result1: &mut self.result1,
-                result2: &mut self.result2,
-            }
-        }
     }
 
     #[test]
@@ -207,6 +121,26 @@ mod regular {
 
         assert!(search.as_hybrid_search_mut().is_none());
         assert!(search.as_hybrid_search_ref().is_none());
+
+        let semantic_search = search.into_semantic_search();
+        assert!(semantic_search.is_some());
+        let mut semantic_search = semantic_search.unwrap();
+        assert_eq!(semantic_search.offset, 0);
+        assert_eq!(semantic_search.limit, 10);
+        // etc
+
+        let ref1 = semantic_search.as_ref();
+        let ref2 = semantic_search.as_ref();
+        assert_eq!(ref1.offset, ref2.offset);
+        assert_eq!(ref1.limit, ref2.limit);
+
+        let mutable = semantic_search.as_mut();
+        assert_eq!(mutable.offset, &0);
+        assert_eq!(mutable.limit, &10);
+        *mutable.offset += 5;
+        assert_eq!(mutable.offset, &5);
+        *mutable.mut_number += 5;
+        assert_eq!(mutable.mut_number, &7);
     }
 }
 
