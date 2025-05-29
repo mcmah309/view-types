@@ -36,6 +36,7 @@ mod regular {
         pub view SemanticSearch<'a> {
             ..all,
             ..semantic,
+            semantic_only_ref
         }
         #[derive(Debug)]
         #[Ref(
@@ -48,7 +49,7 @@ mod regular {
             ..all,
             ..keyword,
             ..semantic,
-            Some(ratio  ) if validate_ratio(ratio)
+            Some(ratio) if validate_ratio(ratio)
         }
     )]
     #[Variant(
@@ -64,6 +65,7 @@ mod regular {
         ratio: Option<f32>,
         mut_number: &'a mut usize,
         field_never_used: bool,
+        semantic_only_ref: &'a usize,
         cannot_infer_type: CannotInferType,
         result1: Result<usize, String>,
         result2: Result<usize, String>,
@@ -98,8 +100,9 @@ mod regular {
     impl<'original_enum, 'a> SemanticSearch<'a> {
         pub fn as_ref(&'original_enum self) -> SemanticSearchRef<'original_enum, 'a> {
             SemanticSearchRef {
-                vector: self.vector,
-                mut_number: self.mut_number,
+                vector: &self.vector,
+                mut_number: &self.mut_number,
+                semantic_only_ref: &self.semantic_only_ref,
                 offset: &self.offset,
                 limit: &self.limit,
                 cannot_infer_type: &self.cannot_infer_type,
@@ -110,8 +113,9 @@ mod regular {
 
         pub fn as_mut(&'original_enum mut self) -> SemanticSearchMut<'original_enum, 'a> {
             SemanticSearchMut {
-                vector: self.vector,
-                mut_number: self.mut_number,
+                vector: &mut self.vector,
+                mut_number: &mut self.mut_number,
+                semantic_only_ref: &mut self.semantic_only_ref,
                 offset: &mut self.offset,
                 limit: &mut self.limit,
                 cannot_infer_type: &mut self.cannot_infer_type,
@@ -143,9 +147,9 @@ mod regular {
                 offset: &mut self.offset,
                 limit: &mut self.limit,
                 words_limit: &mut self.words_limit,
-                vector: self.vector,
+                vector: &mut self.vector,
                 ratio: &mut self.ratio,
-                mut_number: self.mut_number,
+                mut_number: &mut self.mut_number,
                 cannot_infer_type: &mut self.cannot_infer_type,
                 result1: &mut self.result1,
                 result2: &mut self.result2,
@@ -157,6 +161,7 @@ mod regular {
     fn test() {
         let mut magic_number = 1;
         let vector = vec![0u8; 768];
+        let semantic_only_ref = 100;
         let mut search = Search {
             query: Some("test".to_string()),
             offset: 0,
@@ -165,6 +170,7 @@ mod regular {
             vector: Some(&vector),
             ratio: Some(0.5),
             mut_number: &mut magic_number,
+            semantic_only_ref: &semantic_only_ref,
             field_never_used: true,
             cannot_infer_type: CannotInferType::Branch1("branch1".to_owned()),
             result1: Ok(1),

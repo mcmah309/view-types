@@ -394,8 +394,8 @@ fn resolve_field_references<'a, 'b>(
 }
 
 /// Outer references may need to change.
-/// Mut lifetimes need to become `'original`, since otherwise it would imply the possibility of
-/// having two mutable references.
+/// Lifetimes need to become `'original`, since otherwise it would imply the possibility of having two mutable references,
+/// and `as_*_mut/ref` methods would need `'original: *` (original to live at least as long as all inner lifetimes).
 /// And for ref, all refs need to immutable, because the original struct will be borrowed as `&`.
 /// Returns the new type for (is_ref, (ref, mut))
 fn get_new_types_if_reference_type(ty: &syn::Type) -> (bool, Option<(syn::Type, syn::Type)>) {
@@ -408,7 +408,7 @@ fn get_new_types_if_reference_type(ty: &syn::Type) -> (bool, Option<(syn::Type, 
                     Some((
                         syn::Type::Reference(syn::TypeReference {
                             and_token: reference.and_token.clone(),
-                            lifetime: Some(lifetime.clone()),
+                            lifetime: Some(lifetime.clone()), // todo we should change this to ` reference.lifetime.clone()`, but then the `as_*_ref` methods need additional bounds `('original: 'a`)
                             mutability: None,
                             elem: Box::new(reference.elem.as_ref().clone()),
                         }),
