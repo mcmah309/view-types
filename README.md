@@ -2,11 +2,22 @@
 
 The `views` macro provides a declarative way to define type-safe projections from a single source-of-truth data structure declaration. These projects provide different ways of modeling data and minimizes the necessary boilerplate.
 
-## Basic Syntax
+## Basic Syntax And Usage
 
 ```rust
+use view_types::views;
+
+fn validate_ratio(ratio: &f32) -> bool {
+    *ratio >= 0.0 && *ratio <= 1.0
+}
+
+enum CannotInferType {
+    Branch1(String),
+    Branch2(usize),
+}
+
 #[views(
-    // A set of fields to be included in view(s)
+    // A fragment is a set of fields to be included in view(s)
     fragment all {
         // Declaring a field to be included
         offset,
@@ -30,7 +41,7 @@ The `views` macro provides a declarative way to define type-safe projections fro
         mut_number
     }
     
-    // A projection/subset of fields
+    // A view is a projection/subset of fields
     #[derive(Debug, Clone)]
     pub view KeywordSearch {
         // Expanding a fragment to include all fields
@@ -71,7 +82,7 @@ pub struct Search<'a> {
 <details>
 <summary>Expansion</summary>
 
-```rust
+```rust,ignore
 // Recursive expansion of views macro
 // ===================================
 
@@ -608,7 +619,7 @@ impl<'original, 'a> Search<'a> {
 
 Fragments allow you to group related field extractions and reuse them across multiple views:
 
-```rust
+```rust,ignore
 fragment all {
     offset,                                           // Simple field extraction
     limit,
@@ -622,7 +633,7 @@ fragment all {
 
 The macro supports conditional field extraction with custom validation:
 
-```rust
+```rust,ignore
 fragment semantic {
     Some(vector) if vector.len() == 768,  // Conditional extraction
     mut_number
@@ -635,7 +646,7 @@ fragment semantic {
 
 The macro automatically generates a corresponding type and reference types with proper lifetime management for each view:
 
-```rust
+```rust,ignore
 // From this declaration:
 pub view KeywordSearch {
     ..all,
@@ -643,7 +654,7 @@ pub view KeywordSearch {
 }
 ...
 ```
-```rust
+```rust,ignore
 // Generated automatically
 pub struct KeywordSearch {
     offset: usize,
@@ -677,7 +688,7 @@ For each view, the macro generates three access methods e.g.:
 
 e.g.
 
-```rust
+```rust,ignore
 impl Search<'_> {
     pub fn into_keyword_search(self) -> Option<KeywordSearch> {
         Some(KeywordSearch {
@@ -710,32 +721,88 @@ impl Search<'_> {
 ### Basic Conversion
 
 ```rust
-let mut magic_number = 1;
-let vector = vec![0u8; 768];
-let semantic_only_ref = 100;
+use view_types::views;
 
-let mut search = Search {
-    query: Some("rust search".to_string()),
-    offset: 0,
-    limit: 10,
-    words_limit: Some(5),
-    vector: Some(&vector),
-    ratio: Some(0.5),
-    mut_number: &mut magic_number,
-    semantic_only_ref: &semantic_only_ref,
-    // ... other fields
-};
-
-// Try to convert to different view types
-if let Some(keyword) = search.as_keyword_search_ref() {
-    println!("Query: {}", keyword.query);
-    println!("Offset: {}", keyword.offset);
+fn validate_ratio(ratio: &f32) -> bool {
+    *ratio >= 0.0 && *ratio <= 1.0
 }
 
-if let Some(mut hybrid) = search.as_hybrid_search_mut() {
-    *hybrid.mut_number += 1;  // Modify through the view
-    println!("Ratio: {}", hybrid.ratio);
+enum CannotInferType {
+    Branch1(String),
+    Branch2(usize),
 }
 
-let semantic_search = search.into_semantic_search().unwrap();
-println!("Vector length: {}", semantic_search.vector.len());
+#[views(
+    fragment all {
+        offset,
+        limit,
+    }
+    
+    fragment keyword {
+        Some(query),
+        words_limit: Option<usize>
+    }
+    
+    fragment semantic {
+        Some(vector) if vector.len() == 768,
+        mut_number
+    }
+
+    pub view KeywordSearch {
+        ..all,
+        ..keyword,
+    }
+    pub view SemanticSearch<'a> {
+        ..all,
+        ..semantic,
+        semantic_only_ref
+    }
+    
+    pub view HybridSearch<'a> {
+        ..all,
+        ..keyword,
+        ..semantic,
+        Some(ratio) if validate_ratio(ratio)
+    }
+)]
+pub struct Search<'a> {
+    query: Option<String>,
+    offset: usize,
+    limit: usize,
+    words_limit: Option<usize>,
+    vector: Option<&'a Vec<u8>>,
+    ratio: Option<f32>,
+    mut_number: &'a mut usize,
+    semantic_only_ref: &'a usize,
+}
+
+fn main() {
+    let mut magic_number = 1;
+    let vector = vec![0u8; 768];
+    let semantic_only_ref = 100;
+
+    let mut search = Search {
+        query: Some("rust search".to_string()),
+        offset: 0,
+        limit: 10,
+        words_limit: Some(5),
+        vector: Some(&vector),
+        ratio: Some(0.5),
+        mut_number: &mut magic_number,
+        semantic_only_ref: &semantic_only_ref,
+    };
+
+    // Try to convert to different view types
+    if let Some(keyword) = search.as_keyword_search_ref() {
+        println!("Query: {}", keyword.query);
+        println!("Offset: {}", keyword.offset);
+    }
+
+    if let Some(mut hybrid) = search.as_hybrid_search_mut() {
+        *hybrid.mut_number += 1;  // Modify through the view
+        println!("Ratio: {}", hybrid.ratio);
+    }
+
+    let semantic_search = search.into_semantic_search().unwrap();
+    println!("Vector length: {}", semantic_search.vector.len());
+}

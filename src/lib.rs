@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use parse::Views;
 use syn::ItemStruct;
 
