@@ -806,3 +806,4 @@ fn main() {
     let semantic_search = search.into_semantic_search().unwrap();
     println!("Vector length: {}", semantic_search.vector.len());
 }
+```
