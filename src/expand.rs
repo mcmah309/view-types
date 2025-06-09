@@ -1,4 +1,5 @@
 use quote::{format_ident, quote};
+use std::collections::{HashMap, hash_map::Entry};
 use syn::ItemStruct;
 
 use crate::resolve::{Builder, BuilderViewField, ViewStructBuilder};
@@ -16,8 +17,8 @@ pub(crate) fn expand<'a>(
         generated_code.push(view_struct);
         generated_code.push(ref_structs);
     }
-    let views_enum = generate_views_enum(original_struct, &builder)?;
-    generated_code.push(views_enum);
+    let views_enum = generate_views_enum_and_impl(original_struct, &builder)?;
+    generated_code.extend(views_enum);
 
     let conversion_impl = generate_original_conversion_methods(original_struct, &builder)?;
     generated_code.push(conversion_impl);
@@ -40,7 +41,7 @@ fn generate_view_struct(view_struct: &ViewStructBuilder) -> syn::Result<proc_mac
     for builder_field in builder_fields {
         let vis = builder_field.vis;
         let field_name = builder_field.name;
-        let ty = &builder_field.this_regular_struct_field_type;
+        let ty = &builder_field.regular_struct_field_type;
 
         struct_fields.push(quote! {
             #vis #field_name: #ty
@@ -62,10 +63,10 @@ fn generate_view_struct(view_struct: &ViewStructBuilder) -> syn::Result<proc_mac
     })
 }
 
-fn generate_views_enum(
+fn generate_views_enum_and_impl(
     original_struct: &ItemStruct,
     builder: &Builder<'_>,
-) -> syn::Result<proc_macro2::TokenStream> {
+) -> syn::Result<Vec<proc_macro2::TokenStream>> {
     let mut branches = Vec::new();
     for view_struct in &builder.view_structs {
         let name = view_struct.name;
@@ -94,12 +95,158 @@ fn generate_views_enum(
 
     let attrs = &builder.enum_attributes;
 
-    Ok(quote! {
+    let mut tokens = Vec::new();
+
+    tokens.push(quote! {
         #(#attrs)*
         #vis enum #enum_name #generics {
             #(#branches,)*
         }
-    })
+    });
+
+    // Determine the common types for fields - what should be the return type of the variant methods
+    let mut common_types_for_fields = HashMap::new();
+
+    for field in builder.view_structs.iter().flat_map(|e| &e.builder_fields) {
+        let entry = common_types_for_fields.entry(field.name);
+        match entry {
+            Entry::Occupied(mut occupied_entry) => {
+                let current_common_ty: &mut CommmonType = occupied_entry.get_mut();
+                current_common_ty.is_there_an_option =
+                    current_common_ty.is_there_an_option || field.is_option;
+                current_common_ty.is_there_an_owned =
+                    current_common_ty.is_there_an_owned || !field.is_ref;
+                current_common_ty.is_there_a_ref = current_common_ty.is_there_a_ref || field.is_ref;
+                current_common_ty.is_there_a_mut = current_common_ty.is_there_a_mut || field.is_mut;
+            }
+            Entry::Vacant(vacant_entry) => {
+                let common_type = CommmonType {
+                    stripped_type: &field.stripped_type,
+                    is_there_an_option: field.is_option,
+                    is_there_an_owned: !field.is_ref,
+                    is_there_a_ref: field.is_ref,
+                    is_there_a_mut: field.is_mut,
+                };
+                vacant_entry.insert(common_type);
+            }
+        };
+    }
+    for (name, common_ty) in common_types_for_fields.iter_mut() { 
+        for view_struct in builder.view_structs.iter() {
+            if !view_struct.builder_fields.iter().any(|e| &e.name == name) {
+                // At least one view does not contain these field so we need option
+                common_ty.is_there_an_option = true;
+            }
+        }
+    }
+
+    let mut methods = Vec::new();
+    let mut field_to_arms = HashMap::new();
+    for view in &builder.view_structs {
+        let view_name = view.name;
+        for field in view.builder_fields.iter() {
+            let arms_of_field = field_to_arms
+                .entry(&field.name)
+                .or_insert_with(|| Vec::new());
+
+            let target_common_type = common_types_for_fields.get(&field.name).unwrap();
+
+            let name = &field.name;
+
+            // Add ref arms
+            if target_common_type.is_there_an_option {
+                if field.is_option {
+                    if field.is_stripped_type_ref {
+                        arms_of_field.push(quote! {
+                            #enum_name::#view_name(view) => view.#name
+                        });
+                    }
+                    else {
+                        arms_of_field.push(quote! {
+                            #enum_name::#view_name(view) => view.#name.as_ref()
+                        });
+                    }
+                }
+                else {
+                    arms_of_field.push(quote! {
+                        #enum_name::#view_name(view) => Some(&view.#name)
+                    });
+                }
+            } else {
+                arms_of_field.push(quote! {
+                    #enum_name::#view_name(view) => &view.#name
+                });
+            }
+
+            let can_add_mut_method = !target_common_type.is_there_a_ref;
+
+            if can_add_mut_method {
+                // todo
+            }
+
+            let can_add_owned_method =
+                !target_common_type.is_there_a_ref && !target_common_type.is_there_a_mut;
+
+            if can_add_mut_method {
+                // todo
+            }
+        }
+    }
+
+    for (name,target_common_type) in common_types_for_fields.iter() {
+        let arms = field_to_arms.get(name).unwrap();
+        let stripped_type = target_common_type.stripped_type;
+        let is_ref = match stripped_type {
+            syn::Type::Reference(_) => true,
+            _ => false,
+        };
+        let ref_token = if is_ref {
+            quote! {}
+        }
+        else {
+            quote! {&}
+        };
+
+        // Generate ref method
+        if target_common_type.is_there_an_option {
+            methods.push(quote! {
+                pub fn #name(&self) -> Option<#ref_token #stripped_type> {
+                    match self {
+                        #(#arms,)*
+                        _ => None,
+                    }
+                }
+            });
+        } else {
+            methods.push(quote! {
+                pub fn #name(&self) -> #ref_token #stripped_type {
+                    match self {
+                        #(#arms,)*
+                    }
+                }
+            });
+        }
+    }
+
+    // for view in &builder.view_structs {
+    //     for field in view.builder_fields {}
+    // }
+    let (impl_ty, reg_ty, where_ty,) = generics.split_for_impl();
+    tokens.push(quote! {
+        impl #impl_ty #enum_name #reg_ty #where_ty { // todo split
+            #(#methods)*
+        }
+    });
+
+    Ok(tokens)
+}
+
+struct CommmonType<'a> {
+    stripped_type: &'a syn::Type,
+    is_there_an_option: bool,
+    is_there_an_owned: bool,
+    is_there_a_ref: bool,
+    is_there_a_mut: bool,
 }
 
 /// Generate a reference and mutable reference structs
@@ -118,8 +265,8 @@ fn generate_ref_view_structs_and_methods(
     for builder_field in &view_struct.builder_fields {
         let vis = builder_field.vis;
         let field_name = builder_field.name;
-        let ref_ty = &builder_field.this_ref_struct_field_type;
-        let mut_ty = &builder_field.this_mut_struct_field_type;
+        let ref_ty = &builder_field.ref_struct_field_type;
+        let mut_ty = &builder_field.mut_struct_field_type;
 
         // Note: no need to check both, they both will be references or not
         let (additional_immutable_ref, additional_mutable_ref) = match ref_ty {
@@ -440,7 +587,8 @@ fn generate_mut_assignments(
 
     for builder_field in builder_fields {
         let field_name = builder_field.name;
-        let final_deref = if builder_field.is_refs_and_original_struct_lifetime {
+        // Need to rebind lifetime to the original struct
+        let final_deref = if builder_field.refs_need_original_lifetime {
             quote! { &mut *#field_name }
         } else {
             quote! { #field_name }
