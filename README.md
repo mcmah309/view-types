@@ -1,6 +1,6 @@
 # View-types: A Concise Approach to Complex Data Modeling in Rust
 
-The `views` macro provides a declarative way to define type-safe projections from a single source-of-truth data structure declaration. These projects provide different ways of modeling data and minimizes the necessary boilerplate.
+The `views` macro provides a declarative way to define type-safe projections from a single source-of-truth data structure declaration. These projections provide different ways of modeling data and minimizes the necessary boilerplate.
 
 ## Basic Syntax And Usage
 
@@ -725,11 +725,6 @@ use view_types::views;
 
 fn validate_ratio(ratio: &f32) -> bool {
     *ratio >= 0.0 && *ratio <= 1.0
-}
-
-enum CannotInferType {
-    Branch1(String),
-    Branch2(usize),
 }
 
 #[views(
