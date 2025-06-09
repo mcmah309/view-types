@@ -1,5 +1,7 @@
 # View-types: A Concise Approach to Complex Data Modeling in Rust
 
+[<img alt="crates.io" src="https://img.shields.io/crates/v/view-types.svg?style=for-the-badge&color=fc8d62&logo=rust" height="20">](https://crates.io/crates/view-types)
+
 The `views` macro provides a declarative way to define type-safe projections from a single source-of-truth data structure declaration. These projections provide different ways of modeling data and minimizes the necessary boilerplate.
 
 ## Basic Syntax And Usage
