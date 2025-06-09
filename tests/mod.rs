@@ -12,18 +12,18 @@ mod regular {
     }
 
     #[views(
-        fragment all {
+        frag all {
             offset,
             limit,
             CannotInferType::Branch1(cannot_infer_type: String),
             Ok(result1),
             Err(result2)
         }
-        fragment keyword {
+        frag keyword {
             Some(query),
             words_limit: Option<usize>
         }
-        fragment semantic {
+        frag semantic {
             Some(vector) if vector.len() == 768,
             mut_number
         }
@@ -56,7 +56,10 @@ mod regular {
         #[derive(Debug)]
     )]
     #[derive(Debug)]
-    pub struct Search<'a> where 'a: 'a {
+    pub struct Search<'a>
+    where
+        'a: 'a,
+    {
         query: Option<String>,
         offset: usize,
         limit: usize,
@@ -69,6 +72,24 @@ mod regular {
         cannot_infer_type: CannotInferType,
         result1: Result<usize, String>,
         result2: Result<usize, String>,
+    }
+
+    impl<'a> SearchVariant<'a> {
+        pub fn query(&self) -> Option<&String> {
+            match self {
+                SearchVariant::KeywordSearch(keyword_search) => Some(&keyword_search.query),
+                SearchVariant::SemanticSearch(_) => None,
+                SearchVariant::HybridSearch(hybrid_search) => Some(&hybrid_search.query),
+            }
+        }
+
+        pub fn query_mut(&mut self) -> Option<&mut String> {
+            match self {
+                SearchVariant::KeywordSearch(keyword_search) => Some(&mut keyword_search.query),
+                SearchVariant::SemanticSearch(_) => None,
+                SearchVariant::HybridSearch(hybrid_search) => Some(&mut hybrid_search.query),
+            }
+        }
     }
 
     #[test]
@@ -152,15 +173,15 @@ mod builder {
     }
 
     #[views(
-        fragment all {
+        frag all {
             offset,
             limit,
         }
-        fragment keyword {
+        frag keyword {
             Some(query),
             words_limit
         }
-        fragment semantic {
+        frag semantic {
             Some(vector) if vector.len() == 768,
             mut_number
         }
