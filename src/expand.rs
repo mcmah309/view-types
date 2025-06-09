@@ -141,11 +141,11 @@ fn generate_views_enum_and_impl(
     }
 
     let mut methods = Vec::new();
-    let mut field_to_arms = HashMap::new();
+    let mut ref_field_to_arms = HashMap::new();
     for view in &builder.view_structs {
         let view_name = view.name;
         for field in view.builder_fields.iter() {
-            let arms_of_field = field_to_arms
+            let arms_of_field = ref_field_to_arms
                 .entry(&field.name)
                 .or_insert_with(|| Vec::new());
 
@@ -181,20 +181,20 @@ fn generate_views_enum_and_impl(
             let can_add_mut_method = !target_common_type.is_there_a_ref;
 
             if can_add_mut_method {
-                // todo
+                // todo *_mut field accessors
             }
 
             let can_add_owned_method =
                 !target_common_type.is_there_a_ref && !target_common_type.is_there_a_mut;
 
-            if can_add_mut_method {
-                // todo
+            if can_add_owned_method {
+                // todo into_* field accessors
             }
         }
     }
 
     for (name,target_common_type) in common_types_for_fields.iter() {
-        let arms = field_to_arms.get(name).unwrap();
+        let arms = ref_field_to_arms.get(name).unwrap();
         let stripped_type = target_common_type.stripped_type;
         let is_ref = match stripped_type {
             syn::Type::Reference(_) => true,
@@ -228,9 +228,6 @@ fn generate_views_enum_and_impl(
         }
     }
 
-    // for view in &builder.view_structs {
-    //     for field in view.builder_fields {}
-    // }
     let (impl_ty, reg_ty, where_ty,) = generics.split_for_impl();
     tokens.push(quote! {
         impl #impl_ty #enum_name #reg_ty #where_ty { // todo split
@@ -370,7 +367,7 @@ fn generate_original_conversion_methods(
         let snake_case_name = pascal_to_snake_case(&view_name.to_string());
 
         let into_method = format_ident!("into_{}", snake_case_name);
-        let as_ref_method = format_ident!("as_{}_ref", snake_case_name);
+        let as_ref_method = format_ident!("as_{}", snake_case_name);
         let as_mut_method = format_ident!("as_{}_mut", snake_case_name);
 
         // Generate field assignments

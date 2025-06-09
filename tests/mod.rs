@@ -1,4 +1,48 @@
-mod regular {
+mod simple {
+    use view_types::views;
+
+    fn validate_ratio(ratio: &f32) -> bool {
+        *ratio >= 0.0 && *ratio <= 1.0
+    }
+
+    #[views(
+        frag all {
+            offset,
+            limit,
+        }
+        frag keyword {
+            Some(query),
+            words_limit
+        }
+        frag semantic {
+            vector
+        }
+        pub view KeywordSearch {
+            ..all,
+            ..keyword,
+        }
+        pub view SemanticSearch<'a> {
+            ..all,
+            ..semantic,
+        }
+        pub view HybridSearch<'a> {
+            ..all,
+            ..keyword,
+            ..semantic,
+            Some(ratio) if validate_ratio(ratio)
+        }
+    )]
+    pub struct Search<'a> {
+        query: Option<String>,
+        offset: usize,
+        limit: usize,
+        words_limit: Option<usize>,
+        vector: Option<&'a Vec<u8>>,
+        ratio: Option<f32>,
+    }
+}
+
+mod complex {
     use view_types::views;
 
     #[derive(Debug)]
@@ -74,24 +118,6 @@ mod regular {
         result2: Result<usize, String>,
     }
 
-    impl<'a> SearchVariant<'a> {
-        pub fn query(&self) -> Option<&String> {
-            match self {
-                SearchVariant::KeywordSearch(keyword_search) => Some(&keyword_search.query),
-                SearchVariant::SemanticSearch(_) => None,
-                SearchVariant::HybridSearch(hybrid_search) => Some(&hybrid_search.query),
-            }
-        }
-
-        pub fn query_mut(&mut self) -> Option<&mut String> {
-            match self {
-                SearchVariant::KeywordSearch(keyword_search) => Some(&mut keyword_search.query),
-                SearchVariant::SemanticSearch(_) => None,
-                SearchVariant::HybridSearch(hybrid_search) => Some(&mut hybrid_search.query),
-            }
-        }
-    }
-
     #[test]
     fn test() {
         let mut magic_number = 1;
@@ -112,7 +138,7 @@ mod regular {
             result2: Err("error".to_owned()),
         };
 
-        let hybrid_ref: Option<HybridSearchRef<'_, '_>> = search.as_hybrid_search_ref();
+        let hybrid_ref: Option<HybridSearchRef<'_, '_>> = search.as_hybrid_search();
         assert!(hybrid_ref.is_some());
         let hybrid = hybrid_ref.unwrap();
         assert_eq!(hybrid.offset, &0);
@@ -141,7 +167,7 @@ mod regular {
         }
 
         assert!(search.as_hybrid_search_mut().is_none());
-        assert!(search.as_hybrid_search_ref().is_none());
+        assert!(search.as_hybrid_search().is_none());
 
         let semantic_search = search.into_semantic_search();
         assert!(semantic_search.is_some());
@@ -228,7 +254,7 @@ mod builder {
             .field_never_used(true)
             .build();
 
-        let hybrid_ref: Option<HybridSearchRef<'_, '_>> = search.as_hybrid_search_ref();
+        let hybrid_ref: Option<HybridSearchRef<'_, '_>> = search.as_hybrid_search();
         assert!(hybrid_ref.is_some());
         let hybrid = hybrid_ref.unwrap();
         assert_eq!(hybrid.offset, &0);
@@ -257,6 +283,6 @@ mod builder {
         }
 
         assert!(search.as_hybrid_search_mut().is_none());
-        assert!(search.as_hybrid_search_ref().is_none());
+        assert!(search.as_hybrid_search().is_none());
     }
 }

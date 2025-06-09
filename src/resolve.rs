@@ -90,7 +90,7 @@ impl<'a> ViewStructBuilder<'a> {
 pub(crate) struct BuilderViewField<'a> {
     pub vis: &'a Visibility,
     pub name: &'a Ident,
-    pub original_struct_field_type: &'a syn::Type,
+    // pub original_struct_field_type: &'a syn::Type,
     /// view struct field type
     pub regular_struct_field_type: syn::Type,
     /// ref view struct field type
@@ -150,14 +150,14 @@ impl<'a> BuilderViewField<'a> {
             syn::Type::Reference(_) => true,
             _ => false,
         };
-        
+
         Ok(BuilderViewField {
             vis: &original_struct_field.vis,
             name: &original_struct_field
                 .ident
                 .as_ref()
                 .expect("Should not be a tuple struct"),
-            original_struct_field_type,
+            // original_struct_field_type,
             regular_struct_field_type,
             ref_struct_field_type,
             mut_struct_field_type,
