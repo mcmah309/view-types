@@ -279,6 +279,76 @@ pub enum SearchVariant<'a> {
     SemanticSearch(SemanticSearch<'a>),
     HybridSearch(HybridSearch<'a>),
 }
+impl<'a> SearchVariant<'a> {
+    pub fn offset(&self) -> &usize {
+        match self {
+            SearchVariant::KeywordSearch(view) => &view.offset,
+            SearchVariant::SemanticSearch(view) => &view.offset,
+            SearchVariant::HybridSearch(view) => &view.offset,
+        }
+    }
+    pub fn vector(&self) -> Option<&Vec<u8>> {
+        match self {
+            SearchVariant::SemanticSearch(view) => Some(&view.vector),
+            SearchVariant::HybridSearch(view) => Some(&view.vector),
+            _ => None,
+        }
+    }
+    pub fn words_limit(&self) -> Option<&usize> {
+        match self {
+            SearchVariant::KeywordSearch(view) => view.words_limit.as_ref(),
+            SearchVariant::HybridSearch(view) => view.words_limit.as_ref(),
+            _ => None,
+        }
+    }
+    pub fn semantic_only_ref(&self) -> Option<&usize> {
+        match self {
+            SearchVariant::SemanticSearch(view) => Some(&view.semantic_only_ref),
+            _ => None,
+        }
+    }
+    pub fn cannot_infer_type(&self) -> &String {
+        match self {
+            SearchVariant::KeywordSearch(view) => &view.cannot_infer_type,
+            SearchVariant::SemanticSearch(view) => &view.cannot_infer_type,
+            SearchVariant::HybridSearch(view) => &view.cannot_infer_type,
+        }
+    }
+    pub fn query(&self) -> Option<&String> {
+        match self {
+            SearchVariant::KeywordSearch(view) => Some(&view.query),
+            SearchVariant::HybridSearch(view) => Some(&view.query),
+            _ => None,
+        }
+    }
+    pub fn ratio(&self) -> Option<&f32> {
+        match self {
+            SearchVariant::HybridSearch(view) => Some(&view.ratio),
+            _ => None,
+        }
+    }
+    pub fn result1(&self) -> &usize {
+        match self {
+            SearchVariant::KeywordSearch(view) => &view.result1,
+            SearchVariant::SemanticSearch(view) => &view.result1,
+            SearchVariant::HybridSearch(view) => &view.result1,
+        }
+    }
+    pub fn limit(&self) -> &usize {
+        match self {
+            SearchVariant::KeywordSearch(view) => &view.limit,
+            SearchVariant::SemanticSearch(view) => &view.limit,
+            SearchVariant::HybridSearch(view) => &view.limit,
+        }
+    }
+    pub fn mut_number(&self) -> Option<&usize> {
+        match self {
+            SearchVariant::SemanticSearch(view) => Some(&view.mut_number),
+            SearchVariant::HybridSearch(view) => Some(&view.mut_number),
+            _ => None,
+        }
+    }
+}
 impl<'original, 'a> Search<'a> {
     pub fn into_keyword_search(self) -> Option<KeywordSearch> {
         Some(KeywordSearch {
@@ -304,7 +374,7 @@ impl<'original, 'a> Search<'a> {
             words_limit: self.words_limit,
         })
     }
-    pub fn as_keyword_search_ref(&'original self) -> Option<KeywordSearchRef<'original>> {
+    pub fn as_keyword_search(&'original self) -> Option<KeywordSearchRef<'original>> {
         Some(KeywordSearchRef {
             offset: &self.offset,
             limit: &self.limit,
@@ -392,7 +462,7 @@ impl<'original, 'a> Search<'a> {
             semantic_only_ref: self.semantic_only_ref,
         })
     }
-    pub fn as_semantic_search_ref(&'original self) -> Option<SemanticSearchRef<'original, 'a>> {
+    pub fn as_semantic_search(&'original self) -> Option<SemanticSearchRef<'original, 'a>> {
         Some(SemanticSearchRef {
             offset: &self.offset,
             limit: &self.limit,
@@ -510,7 +580,7 @@ impl<'original, 'a> Search<'a> {
             },
         })
     }
-    pub fn as_hybrid_search_ref(&'original self) -> Option<HybridSearchRef<'original, 'a>> {
+    pub fn as_hybrid_search(&'original self) -> Option<HybridSearchRef<'original, 'a>> {
         Some(HybridSearchRef {
             offset: &self.offset,
             limit: &self.limit,
@@ -685,7 +755,7 @@ pub struct KeywordSearchMut<'original> {
 For each view, the macro generates three access methods e.g.:
 
 - **Owned conversion**: `into_keyword_search()` - Returns ``Option<KeywordSearch>`
-- **Immutable borrowing**: `as_keyword_search_ref()` - Returns `Option<KeywordSearchRef<'...>>`
+- **Immutable borrowing**: `as_keyword_search()` - Returns `Option<KeywordSearchRef<'...>>`
 - **Mutable borrowing**: `as_keyword_search_mut()` - Returns `Option<KeywordSearchMut<'...>>`
 
 e.g.
@@ -790,7 +860,7 @@ fn main() {
     };
 
     // Try to convert to different view types
-    if let Some(keyword) = search.as_keyword_search_ref() {
+    if let Some(keyword) = search.as_keyword_search() {
         println!("Query: {}", keyword.query);
         println!("Offset: {}", keyword.offset);
     }
