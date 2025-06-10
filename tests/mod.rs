@@ -42,6 +42,99 @@ mod simple {
     }
 }
 
+mod variant_testing {
+    use view_types::views;
+
+    #[views(
+        pub view One<'a> {
+            opt,
+            Some(opt_ref),
+            // opt_mut,
+            ref_opt,
+            mut_opt,
+            // mut_opt_ref,
+            // mut_opt_mut,
+            // ref_opt_ref,
+            // ref_opt_mut,
+        }
+        pub view Two<'a> {
+            Some(opt),
+            Some(opt_ref),
+            Some(opt_mut),
+            Some(ref_opt),
+            // Some(mut_opt),
+            // Some(mut_opt_ref),
+            // Some(mut_opt_mut),
+            Some(ref_opt_ref),
+            // Some(ref_opt_mut),
+        }
+        pub view Three<'a> {
+            opt,
+            Some(opt_ref),
+            // opt_mut,
+            Some(ref_opt),
+            mut_opt,
+            // Some(mut_opt_ref),
+            // mut_opt_mut,
+            Some(ref_opt_ref),
+            // ref_opt_mut,
+        }
+    )]
+    pub struct OptionTest<'a> {
+        opt: Option<String>,
+        opt_ref: Option<&'a String>,
+        opt_mut: Option<&'a mut String>,
+        ref_opt: &'a Option<String>,
+        mut_opt: &'a mut Option<String>,
+        mut_opt_ref: &'a mut Option<&'a String>,
+        mut_opt_mut: &'a mut Option<&'a mut String>,
+        ref_opt_ref: &'a Option<&'a String>,
+        ref_opt_mut: &'a Option<&'a mut String>,
+    }
+
+    #[test]
+    fn test() {
+        let opt = Some("test".to_string());
+        let bind1 = "1".to_string();
+        let mut opt_ref = Some(&bind1);
+        let mut bind2 = "2".to_string();
+        let mut opt_mut = Some(&mut bind2);
+        let bind4 = Some("4".to_string());
+        let ref_opt = &bind4;
+        let mut bind3 = Some("3".to_string());
+        let mut mut_opt = &mut bind3;
+        let bind5 = "5".to_string();
+        let mut bind6 = Some(&bind5);
+        let mut mut_opt_ref = &mut bind6;
+        let ref_opt_ref = &opt_ref;
+        let mut bind8 = "8".to_owned();
+        let mut bind9 = Some(&mut bind8);
+        let mut_opt_mut = &mut bind9;
+        let mut bind7 = "7".to_owned();
+        let mut ref_opt_mut = &Some(&mut bind7);
+
+        let option_test = OptionTest {
+            opt,
+            opt_ref,
+            opt_mut,
+            ref_opt,
+            mut_opt,
+            mut_opt_ref,
+            mut_opt_mut,
+            ref_opt_ref,
+            ref_opt_mut,
+        };
+
+        let three = option_test.into_three().unwrap();
+        let variant = OptionTestVariant::Three(three);
+        assert_eq!(variant.opt(), Some(&"test".to_string()));
+        assert_eq!(variant.opt_ref(), &"1".to_string());
+        assert_eq!(variant.opt_mut(), None);
+        assert_eq!(variant.ref_opt(), Some("4".to_string()).as_ref());
+        assert_eq!(variant.mut_opt(), Some(&"3".to_string()));
+    }
+}
+
 mod complex {
     use view_types::views;
 

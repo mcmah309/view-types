@@ -125,8 +125,7 @@ impl<'a> BuilderViewField<'a> {
                 regular_struct_field_type = explicit_type.clone();
             } else {
                 regular_struct_field_type =
-                    get_inner_type_for_pattern_match(original_struct_field_type, pattern_to_match)?
-                        .clone()
+                    infer_inner_type_for_pattern_match(original_struct_field_type, pattern_to_match)?
             }
         } else {
             if let Some(explicit_type) = explicit_type {
@@ -491,67 +490,87 @@ fn is_option(ty: &Type) -> bool {
     false
 }
 
-fn get_inner_type_for_pattern_match<'a>(
+fn infer_inner_type_for_pattern_match<'a>(
     ty: &'a Type,
     pattern_match: &syn::Path,
-) -> syn::Result<&'a Type> {
+) -> syn::Result<Type> {
     let error = || {
         Err(syn::Error::new_spanned(
             pattern_match,
             "Anonymous pattern deconstructing is not implemented for this type. Add a type definition for the inner e.g. `EnumName::Branch(field: Type)`",
         ))
     };
-    match ty {
-        syn::Type::Path(ty) => {
-            let ty_last_segment = &ty.path.segments.last().unwrap();
-            let ty_last_segment_name = ty_last_segment.ident.to_string();
-            match ty_last_segment_name.as_str() {
-                "Result" => {
-                    let arguments = &ty.path.segments.last().unwrap().arguments;
-                    match arguments {
-                        syn::PathArguments::AngleBracketed(generic_arguments) => {
-                            let mut args = generic_arguments.args.iter();
-                            let ok = args.next().unwrap();
-                            let Some(err) = args.next() else {
-                                return error();
-                            };
-                            let is_ok = pattern_match
-                                .segments
-                                .last()
-                                .unwrap()
-                                .ident
-                                .to_string()
-                                .as_str()
-                                == "Ok";
-                            let type_to_use = if is_ok { ok } else { err };
-                            match type_to_use {
-                                GenericArgument::Type(inner_type) => return Ok(inner_type),
-                                _ => return error(),
-                            };
-                        }
-                        _ => return error(),
-                    }
-                }
-                "Option" => {
-                    let arguments = &ty_last_segment.arguments;
-                    match arguments {
-                        syn::PathArguments::AngleBracketed(generic_arguments) => {
-                            let mut args = generic_arguments.args.iter();
-                            let inner_generic_arg = args.next().unwrap();
-                            if args.len() != 0 {
-                                return error();
-                            }
-                            match inner_generic_arg {
-                                GenericArgument::Type(inner_type) => return Ok(inner_type),
-                                _ => return error(),
-                            };
-                        }
-                        _ => return error(),
-                    }
-                }
-                _ => return error(),
-            };
-        }
-        _ => return error(),
+    let is_ref;
+    let ty2 = if let syn::Type::Reference(ref_ty) = ty {
+        is_ref = true;
+        &*ref_ty.elem
+    } else {
+        is_ref = false;
+        ty
     };
+    let inner_type: &syn::Type = if let syn::Type::Path(ty) = ty2 {
+        let ty_last_segment = &ty.path.segments.last().unwrap();
+        let ty_last_segment_name = ty_last_segment.ident.to_string();
+        match ty_last_segment_name.as_str() {
+            "Result" => {
+                let arguments = &ty.path.segments.last().unwrap().arguments;
+                match arguments {
+                    syn::PathArguments::AngleBracketed(generic_arguments) => {
+                        let mut args = generic_arguments.args.iter();
+                        let ok = args.next().unwrap();
+                        let Some(err) = args.next() else {
+                            return error();
+                        };
+                        let is_ok = pattern_match
+                            .segments
+                            .last()
+                            .unwrap()
+                            .ident
+                            .to_string()
+                            .as_str()
+                            == "Ok";
+                        let type_to_use = if is_ok { ok } else { err };
+                        match type_to_use {
+                            GenericArgument::Type(inner_type) => inner_type,
+                            _ => return error(),
+                        }
+                    }
+                    _ => return error(),
+                }
+            }
+            "Option" => {
+                let arguments = &ty_last_segment.arguments;
+                match arguments {
+                    syn::PathArguments::AngleBracketed(generic_arguments) => {
+                        let args = generic_arguments.args.iter();
+                        let inner_generic_type = args.last().unwrap();
+                        match inner_generic_type {
+                            GenericArgument::Type(inner_type) => inner_type,
+                            _ => return error(),
+                        }
+                    }
+                    _ => return error(),
+                }
+            }
+            _ => return error(),
+        }
+    } else {
+        return error();
+    };
+    if is_ref {
+        if let syn::Type::Reference(ref_ty) = ty {
+            Ok(syn::Type::Reference(syn::TypeReference {
+                and_token: ref_ty.and_token.clone(),
+                lifetime: ref_ty.lifetime.clone(),
+                mutability: None,
+                elem: Box::new(inner_type.clone()),
+            }))
+        } else {
+            unreachable!()
+        }
+    
+    }
+    else {
+        Ok(inner_type.clone())
+    }
 }

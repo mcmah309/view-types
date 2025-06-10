@@ -10,9 +10,9 @@ pub(crate) fn expand<'a>(
 ) -> syn::Result<proc_macro2::TokenStream> {
     let mut generated_code = Vec::new();
 
-    for view_structs in &mut builder.view_structs {
+    for mut view_structs in &mut builder.view_structs {
         let view_struct = generate_view_struct(view_structs)?;
-        let ref_structs = generate_ref_view_structs_and_methods(view_structs)?; // Note: This mutates, order matters
+        let ref_structs = generate_ref_view_structs_and_methods(&mut view_structs)?; // Note: This mutates, order matters
 
         generated_code.push(view_struct);
         generated_code.push(ref_structs);
