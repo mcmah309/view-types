@@ -124,8 +124,10 @@ impl<'a> BuilderViewField<'a> {
             if let Some(explicit_type) = explicit_type {
                 regular_struct_field_type = explicit_type.clone();
             } else {
-                regular_struct_field_type =
-                    infer_inner_type_for_pattern_match(original_struct_field_type, pattern_to_match)?
+                regular_struct_field_type = infer_inner_type_for_pattern_match(
+                    original_struct_field_type,
+                    pattern_to_match,
+                )?
             }
         } else {
             if let Some(explicit_type) = explicit_type {
@@ -437,12 +439,13 @@ fn determine_reference_types(ty: &syn::Type) -> (bool, bool, Option<(syn::Type, 
 }
 
 /// Strips the type of references and options.
-fn stripped_type(ty: &syn::Type) -> syn::Type {
-    match ty {
-        syn::Type::Path(type_path) => {
-            if let Some(last_segment) = type_path.path.segments.last()
-                && last_segment.ident == "Option"
-            {
+fn stripped_type(mut ty: &syn::Type) -> syn::Type {
+    if let syn::Type::Reference(type_reference) = ty {
+        ty = &*type_reference.elem;
+    }
+    if let syn::Type::Path(type_path) = ty {
+        if let Some(last_segment) = type_path.path.segments.last() {
+            if last_segment.ident == "Option" {
                 if let syn::PathArguments::AngleBracketed(args) = &last_segment.arguments {
                     if let Some(GenericArgument::Type(inner_type)) = args.args.first() {
                         return inner_type.clone();
@@ -450,23 +453,7 @@ fn stripped_type(ty: &syn::Type) -> syn::Type {
                 }
             }
         }
-        syn::Type::Reference(type_reference) => {
-            if let syn::Type::Path(type_path) = type_reference.elem.as_ref() {
-                if let Some(last_segment) = type_path.path.segments.last()
-                    && last_segment.ident == "Option"
-                {
-                    if let syn::PathArguments::AngleBracketed(args) = &last_segment.arguments {
-                        if let Some(GenericArgument::Type(inner_type)) = args.args.first() {
-                            return inner_type.clone();
-                        }
-                    }
-                } else {
-                    return type_reference.elem.as_ref().clone();
-                }
-            }
-        }
-        _ => {}
-    };
+    }
 
     ty.clone()
 }
@@ -568,9 +555,7 @@ fn infer_inner_type_for_pattern_match<'a>(
         } else {
             unreachable!()
         }
-    
-    }
-    else {
+    } else {
         Ok(inner_type.clone())
     }
 }
