@@ -2,6 +2,9 @@ use syn::{
     braced, parenthesized, parse::{Parse, ParseStream, Result}, token::Paren, Attribute, Expr, Ident, Token, Visibility
 };
 
+const FRAG: &str = "frag";
+const VIEW: &str = "view";
+
 /// Top-level view specification with fragments and structs
 #[derive(Debug)]
 pub(crate) struct Views {
@@ -59,17 +62,17 @@ impl Parse for Views {
                 let fork = input.fork();
                 let ident: Ident = fork.parse()?;
 
-                if ident == "fragment" {
+                if ident == FRAG {
                     let fragment = input.parse::<Fragment>()?;
                     fragments.push(fragment);
-                } else if ident == "view" {
+                } else if ident == VIEW {
                     let view_struct = input.parse::<ViewStruct>()?;
                     view_structs.push(view_struct);
                 }
                 else {
                     return Err(syn::Error::new(
                         ident.span(),
-                        "Expected 'fragment' or 'view'",
+                        format!("Expected '{FRAG}' or '{VIEW}'"),
                     ));
                 }
             } else if lookahead.peek(Token![#])
@@ -80,7 +83,7 @@ impl Parse for Views {
             } else {
                 return Err(syn::Error::new(
                     input.span(),
-                    "Expected 'fragment', 'view', attribute, or visibility",
+                    format!("Expected '{FRAG}', '{VIEW}', attribute, or visibility"),
                 ));
             }
         }
@@ -95,10 +98,10 @@ impl Parse for Views {
 impl Parse for Fragment {
     fn parse(input: ParseStream) -> Result<Self> {
         let fragment_keyword: Ident = input.parse()?;
-        if fragment_keyword != "fragment" {
+        if fragment_keyword != FRAG {
             return Err(syn::Error::new(
                 fragment_keyword.span(),
-                "Expected 'fragment'",
+                format!("Expected '{FRAG}'"),
             ));
         }
         let name: Ident = input.parse()?;
@@ -128,10 +131,10 @@ impl Parse for ViewStruct {
         let mut_attributes = extract_nested_attributes("Mut", &mut attributes)?;
         let visibility = input.parse::<Visibility>().ok();
         let ty = input.parse::<Ident>()?;
-        if ty.to_string().as_str() != "view" {
+        if ty.to_string().as_str() != VIEW {
             return Err(syn::Error::new(
                 ty.span(),
-                "Expected 'view' keyword",
+                format!("Expected '{VIEW}' keyword"),
             ));
         }
         let name: Ident = input.parse()?;
@@ -341,7 +344,7 @@ mod tests {
     #[test]
     fn test_parse_fragment() {
         let input = parse_quote! {
-            fragment all {
+            frag all {
                 offset,
                 limit
             }
@@ -378,7 +381,7 @@ mod tests {
     #[test]
     fn test_parse_fragment_with_validations() {
         let input = parse_quote! {
-            fragment semantic {
+            frag semantic {
                 Some(semantic) if valid_semantic_value(semantic),
                 Some(query)
             }
@@ -393,11 +396,11 @@ mod tests {
     #[test]
     fn test_parse_full_view_spec() {
         let input = parse_quote! {
-            fragment all {
+            frag all {
                 offset,
                 limit
             }
-            fragment keyword {
+            frag keyword {
                 Some(query),
                 words_limit
             }
@@ -419,11 +422,11 @@ mod tests {
     #[test]
     fn test_resolve_view_fields() {
         let input = parse_quote! {
-            fragment all {
+            frag all {
                 offset,
                 limit
             }
-            fragment keyword {
+            frag keyword {
                 Some(query)
             }
             view KeywordSearch {

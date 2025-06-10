@@ -20,7 +20,7 @@ enum CannotInferType {
 
 #[views(
     // A fragment is a set of fields to be included in view(s)
-    fragment all {
+    frag all {
         // Declaring a field to be included
         offset,
         limit,
@@ -30,14 +30,14 @@ enum CannotInferType {
         Ok(result1),
     }
     
-    fragment keyword {
+    frag keyword {
         // Option unwrapping
         Some(query),
         // Explicit type declaration
         words_limit: Option<usize>
     }
     
-    fragment semantic {
+    frag semantic {
         // Option unwrapping with validation
         Some(vector) if vector.len() == 768,
         mut_number
@@ -622,7 +622,7 @@ impl<'original, 'a> Search<'a> {
 Fragments allow you to group related field extractions and reuse them across multiple views:
 
 ```rust,ignore
-fragment all {
+frag all {
     offset,                                           // Simple field extraction
     limit,
     CannotInferType::Branch1(cannot_infer_type: String), // Enum pattern matching
@@ -636,7 +636,7 @@ fragment all {
 The macro supports conditional field extraction with custom validation:
 
 ```rust,ignore
-fragment semantic {
+frag semantic {
     Some(vector) if vector.len() == 768,  // Conditional extraction
     mut_number
 }
@@ -730,17 +730,17 @@ fn validate_ratio(ratio: &f32) -> bool {
 }
 
 #[views(
-    fragment all {
+    frag all {
         offset,
         limit,
     }
     
-    fragment keyword {
+    frag keyword {
         Some(query),
         words_limit: Option<usize>
     }
     
-    fragment semantic {
+    frag semantic {
         Some(vector) if vector.len() == 768,
         mut_number
     }

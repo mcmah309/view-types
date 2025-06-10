@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use syn::{
-    Attribute, Error, Expr, Field, GenericArgument, Generics, Ident, ItemStruct, Lifetime, Type, Visibility
+    Attribute, Error, Expr, Field, GenericArgument, Generics, Ident, ItemStruct, Lifetime, Type,
+    Visibility,
 };
 
 use crate::parse::{ViewStructFieldKind, Views};
@@ -22,7 +23,7 @@ pub(crate) struct ViewStructBuilder<'a> {
     /// Generics that are used in the regular view struct
     regular_generics: Option<syn::Generics>,
     pub ref_attributes: &'a Vec<Attribute>,
-    pub mut_attributes: &'a Vec<Attribute>
+    pub mut_attributes: &'a Vec<Attribute>,
 }
 
 impl<'a> ViewStructBuilder<'a> {
@@ -89,11 +90,20 @@ impl<'a> ViewStructBuilder<'a> {
 pub(crate) struct BuilderViewField<'a> {
     pub vis: &'a Visibility,
     pub name: &'a Ident,
-    pub this_regular_struct_field_type: syn::Type,
-    pub this_ref_struct_field_type: syn::Type,
-    pub this_mut_struct_field_type: syn::Type,
+    // pub original_struct_field_type: &'a syn::Type,
+    /// view struct field type
+    pub regular_struct_field_type: syn::Type,
+    /// ref view struct field type
+    pub ref_struct_field_type: syn::Type,
+    /// ref view struct field type
+    pub mut_struct_field_type: syn::Type,
+    /// regular struct type without outer ref/mut and outer Option (possible inner ref/mut still there)
+    pub stripped_type: syn::Type,
+    pub is_stripped_type_ref: bool,
     pub is_ref: bool,
-    pub is_refs_and_original_struct_lifetime: bool,
+    pub is_mut: bool,
+    pub is_option: bool,
+    pub refs_need_original_lifetime: bool,
     pub pattern_to_match: &'a Option<syn::Path>,
     pub validation: &'a Option<Expr>,
 }
@@ -105,37 +115,40 @@ impl<'a> BuilderViewField<'a> {
         explicit_type: &'a Option<syn::Type>,
         validation: &'a Option<Expr>,
     ) -> syn::Result<BuilderViewField<'a>> {
-        let this_regular_struct_field_type;
-        let this_ref_struct_field_type;
-        let this_mut_struct_field_type;
-        let is_ref;
-        let is_refs_and_original_struct_lifetime;
+        let original_struct_field_type = &original_struct_field.ty;
+        let regular_struct_field_type;
+        let ref_struct_field_type;
+        let mut_struct_field_type;
+        let refs_need_original_lifetime;
         if let Some(pattern_to_match) = pattern_to_match {
             if let Some(explicit_type) = explicit_type {
-                this_regular_struct_field_type = explicit_type.clone();
+                regular_struct_field_type = explicit_type.clone();
             } else {
-                this_regular_struct_field_type =
-                    get_inner_type_for_pattern_match(&original_struct_field.ty, pattern_to_match)?
-                        .clone()
+                regular_struct_field_type =
+                    infer_inner_type_for_pattern_match(original_struct_field_type, pattern_to_match)?
             }
         } else {
             if let Some(explicit_type) = explicit_type {
-                this_regular_struct_field_type = explicit_type.clone();
+                regular_struct_field_type = explicit_type.clone();
             } else {
-                this_regular_struct_field_type = original_struct_field.ty.clone();
+                regular_struct_field_type = original_struct_field_type.clone();
             }
         }
-        let (is_ref_inner, type_changes) =
-            get_new_types_if_reference_type(&this_regular_struct_field_type);
-        is_ref = is_ref_inner;
-        is_refs_and_original_struct_lifetime = type_changes.is_some();
+        let (is_ref, is_mut, type_changes) = determine_reference_types(&regular_struct_field_type);
+        refs_need_original_lifetime = type_changes.is_some();
         if let Some((ref_type, mut_type)) = type_changes {
-            this_ref_struct_field_type = ref_type;
-            this_mut_struct_field_type = mut_type;
+            ref_struct_field_type = ref_type;
+            mut_struct_field_type = mut_type;
         } else {
-            this_ref_struct_field_type = this_regular_struct_field_type.clone();
-            this_mut_struct_field_type = this_regular_struct_field_type.clone();
+            ref_struct_field_type = regular_struct_field_type.clone();
+            mut_struct_field_type = regular_struct_field_type.clone();
         }
+        let is_option = is_option(&ref_struct_field_type);
+        let stripped_type = stripped_type(&regular_struct_field_type);
+        let is_stripped_type_ref = match stripped_type {
+            syn::Type::Reference(_) => true,
+            _ => false,
+        };
 
         Ok(BuilderViewField {
             vis: &original_struct_field.vis,
@@ -143,11 +156,16 @@ impl<'a> BuilderViewField<'a> {
                 .ident
                 .as_ref()
                 .expect("Should not be a tuple struct"),
-            this_regular_struct_field_type,
-            this_ref_struct_field_type,
-            this_mut_struct_field_type,
+            // original_struct_field_type,
+            regular_struct_field_type,
+            ref_struct_field_type,
+            mut_struct_field_type,
+            stripped_type,
+            is_stripped_type_ref,
             is_ref,
-            is_refs_and_original_struct_lifetime,
+            is_mut,
+            is_option,
+            refs_need_original_lifetime,
             pattern_to_match,
             validation,
         })
@@ -377,25 +395,28 @@ fn resolve_field_references<'a, 'b>(
     Ok(builder_view_structs)
 }
 
-/// Outer references may need to change.
+/// Determines the correct reference types.
+/// Outer references may need to change -
 /// Mut lifetimes need to become `'original`, since otherwise it would imply the possibility of having two mutable references,
 /// and `as_*_mut` methods would need `'original: *` (original to live at least as long as all inner lifetimes).
 /// And for ref, all refs need to immutable, because the original struct will be borrowed as `&`.
 /// # Returns
-/// (is_ref, (ref, mut))
+/// (is_ref, is_mut, (ref_ty, mut_ty))
 /// * `is_ref` - whether the type is a reference type
-/// * `(ref, mut)` - the new types if it is a reference type for `Ref` and `Mut` types
-fn get_new_types_if_reference_type(ty: &syn::Type) -> (bool, Option<(syn::Type, syn::Type)>) {
+/// * `is_mut` - whether the type is a mut reference type
+/// * `(ref_ty, mut_ty)` - the new types if it is a reference type for `Ref` and `Mut` types
+fn determine_reference_types(ty: &syn::Type) -> (bool, bool, Option<(syn::Type, syn::Type)>) {
     match ty {
         syn::Type::Reference(reference) => {
             if reference.mutability.is_some() {
                 let lifetime: Lifetime = syn::parse_quote!('original);
                 (
                     true,
+                    true,
                     Some((
                         syn::Type::Reference(syn::TypeReference {
                             and_token: reference.and_token.clone(),
-                            lifetime: Some(lifetime.clone()),
+                            lifetime: Some(lifetime.clone()), // todo why can't this remain the same again?
                             mutability: None,
                             elem: Box::new(reference.elem.as_ref().clone()),
                         }),
@@ -408,74 +429,148 @@ fn get_new_types_if_reference_type(ty: &syn::Type) -> (bool, Option<(syn::Type, 
                     )),
                 )
             } else {
-                (true, None)
+                (true, false, None)
             }
         }
-        _ => (false, None),
+        _ => (false, false, None),
     }
 }
 
-fn get_inner_type_for_pattern_match<'a>(
+/// Strips the type of references and options.
+fn stripped_type(ty: &syn::Type) -> syn::Type {
+    match ty {
+        syn::Type::Path(type_path) => {
+            if let Some(last_segment) = type_path.path.segments.last()
+                && last_segment.ident == "Option"
+            {
+                if let syn::PathArguments::AngleBracketed(args) = &last_segment.arguments {
+                    if let Some(GenericArgument::Type(inner_type)) = args.args.first() {
+                        return inner_type.clone();
+                    }
+                }
+            }
+        }
+        syn::Type::Reference(type_reference) => {
+            if let syn::Type::Path(type_path) = type_reference.elem.as_ref() {
+                if let Some(last_segment) = type_path.path.segments.last()
+                    && last_segment.ident == "Option"
+                {
+                    if let syn::PathArguments::AngleBracketed(args) = &last_segment.arguments {
+                        if let Some(GenericArgument::Type(inner_type)) = args.args.first() {
+                            return inner_type.clone();
+                        }
+                    }
+                } else {
+                    return type_reference.elem.as_ref().clone();
+                }
+            }
+        }
+        _ => {}
+    };
+
+    ty.clone()
+}
+
+fn is_option(ty: &Type) -> bool {
+    match ty {
+        Type::Path(type_path) => {
+            if let Some(last_segment) = type_path.path.segments.last() {
+                return last_segment.ident == "Option";
+            }
+        }
+        Type::Reference(type_reference) => {
+            if let Type::Path(type_path) = type_reference.elem.as_ref() {
+                if let Some(last_segment) = type_path.path.segments.last() {
+                    return last_segment.ident == "Option";
+                }
+            }
+        }
+        _ => {}
+    };
+    false
+}
+
+fn infer_inner_type_for_pattern_match<'a>(
     ty: &'a Type,
     pattern_match: &syn::Path,
-) -> syn::Result<&'a Type> {
+) -> syn::Result<Type> {
     let error = || {
         Err(syn::Error::new_spanned(
             pattern_match,
             "Anonymous pattern deconstructing is not implemented for this type. Add a type definition for the inner e.g. `EnumName::Branch(field: Type)`",
         ))
     };
-    match ty {
-        syn::Type::Path(ty) => {
-            let ty_last_segment = &ty.path.segments.last().unwrap();
-            let ty_last_segment_name = ty_last_segment.ident.to_string();
-            match ty_last_segment_name.as_str() {
-                "Result" => {
-                    let arguments = &ty.path.segments.last().unwrap().arguments;
-                    match arguments {
-                        syn::PathArguments::AngleBracketed(generic_arguments) => {
-                            let mut args = generic_arguments.args.iter();
-                            let ok = args.next().unwrap();
-                            let Some(err) = args.next() else {
-                                return error();
-                            };
-                            let is_ok = pattern_match
-                                .segments
-                                .last()
-                                .unwrap()
-                                .ident
-                                .to_string()
-                                .as_str()
-                                == "Ok";
-                            let type_to_use = if is_ok { ok } else { err };
-                            match type_to_use {
-                                GenericArgument::Type(inner_type) => return Ok(inner_type),
-                                _ => return error(),
-                            };
-                        }
-                        _ => return error(),
-                    }
-                }
-                "Option" => {
-                    let arguments = &ty_last_segment.arguments;
-                    match arguments {
-                        syn::PathArguments::AngleBracketed(generic_arguments) => {
-                            let mut args = generic_arguments.args.iter();
-                            let inner_generic_arg = args.next().unwrap();
-                            if args.len() != 0 {
-                                return error();
-                            }
-                            match inner_generic_arg {
-                                GenericArgument::Type(inner_type) => return Ok(inner_type),
-                                _ => return error(),
-                            };
-                        }
-                        _ => return error(),
-                    }
-                }
-                _ => return error(),
-            };
-        }
-        _ => return error(),
+    let is_ref;
+    let ty2 = if let syn::Type::Reference(ref_ty) = ty {
+        is_ref = true;
+        &*ref_ty.elem
+    } else {
+        is_ref = false;
+        ty
     };
+    let inner_type: &syn::Type = if let syn::Type::Path(ty) = ty2 {
+        let ty_last_segment = &ty.path.segments.last().unwrap();
+        let ty_last_segment_name = ty_last_segment.ident.to_string();
+        match ty_last_segment_name.as_str() {
+            "Result" => {
+                let arguments = &ty.path.segments.last().unwrap().arguments;
+                match arguments {
+                    syn::PathArguments::AngleBracketed(generic_arguments) => {
+                        let mut args = generic_arguments.args.iter();
+                        let ok = args.next().unwrap();
+                        let Some(err) = args.next() else {
+                            return error();
+                        };
+                        let is_ok = pattern_match
+                            .segments
+                            .last()
+                            .unwrap()
+                            .ident
+                            .to_string()
+                            .as_str()
+                            == "Ok";
+                        let type_to_use = if is_ok { ok } else { err };
+                        match type_to_use {
+                            GenericArgument::Type(inner_type) => inner_type,
+                            _ => return error(),
+                        }
+                    }
+                    _ => return error(),
+                }
+            }
+            "Option" => {
+                let arguments = &ty_last_segment.arguments;
+                match arguments {
+                    syn::PathArguments::AngleBracketed(generic_arguments) => {
+                        let args = generic_arguments.args.iter();
+                        let inner_generic_type = args.last().unwrap();
+                        match inner_generic_type {
+                            GenericArgument::Type(inner_type) => inner_type,
+                            _ => return error(),
+                        }
+                    }
+                    _ => return error(),
+                }
+            }
+            _ => return error(),
+        }
+    } else {
+        return error();
+    };
+    if is_ref {
+        if let syn::Type::Reference(ref_ty) = ty {
+            Ok(syn::Type::Reference(syn::TypeReference {
+                and_token: ref_ty.and_token.clone(),
+                lifetime: ref_ty.lifetime.clone(),
+                mutability: None,
+                elem: Box::new(inner_type.clone()),
+            }))
+        } else {
+            unreachable!()
+        }
+    
+    }
+    else {
+        Ok(inner_type.clone())
+    }
 }

@@ -18,15 +18,15 @@ mod resolve;
 /// }
 /// 
 /// #[views(
-///     fragment all {
+///     frag all {
 ///         offset,
 ///         limit,
 ///     }
-///     fragment keyword {
+///     frag keyword {
 ///         Some(query),
 ///         words_limit
 ///     }
-///     fragment semantic {
+///     frag semantic {
 ///         vector
 ///     }
 ///     pub view KeywordSearch {
