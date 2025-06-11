@@ -790,87 +790,263 @@ impl Search<'_> {
 
 ## Usage Examples
 
-### Basic Conversion
+### Example Using Monolith
 
 ```rust
 use view_types::views;
 
-fn validate_ratio(ratio: &f32) -> bool {
-    *ratio >= 0.0 && *ratio <= 1.0
+fn validate_table_name(name: &str) -> bool {
+    name.chars().all(|c| c.is_alphanumeric() || c == '_') && !name.is_empty()
+}
+
+fn validate_limit(limit: &u32) -> bool {
+    *limit > 0 && *limit <= 10000
+}
+
+#[derive(Debug, Clone)]
+pub struct JoinClause {
+    pub table: String,
+    pub condition: String,
 }
 
 #[views(
-    frag all {
-        offset,
-        limit,
-    }
-    
-    frag keyword {
-        Some(query),
-        words_limit: Option<usize>
-    }
-    
-    frag semantic {
-        Some(vector) if vector.len() == 768,
-        mut_number
+
+    frag base {
+        Some(table) if validate_table_name(table),
+        columns,
     }
 
-    pub view KeywordSearch {
-        ..all,
-        ..keyword,
-    }
-    pub view SemanticSearch<'a> {
-        ..all,
-        ..semantic,
-        semantic_only_ref
+    #[derive(Debug, Clone)]
+    pub view SelectQuery {
+        ..base
     }
     
-    pub view HybridSearch<'a> {
-        ..all,
-        ..keyword,
-        ..semantic,
-        Some(ratio) if validate_ratio(ratio)
+    #[derive(Debug, Clone)]  
+    pub view PaginatedQuery {
+        ..base,
+        Some(limit) if validate_limit(limit),
+        Some(offset),
+    }
+    
+    #[derive(Debug, Clone)]
+    pub view JoinQuery {
+        ..base,
+        Some(join_clauses) if !join_clauses.is_empty(),
     }
 )]
-pub struct Search<'a> {
-    query: Option<String>,
-    offset: usize,
-    limit: usize,
-    words_limit: Option<usize>,
-    vector: Option<&'a Vec<u8>>,
-    ratio: Option<f32>,
-    mut_number: &'a mut usize,
-    semantic_only_ref: &'a usize,
+#[derive(Debug)]
+pub struct QueryBuilder {
+    table: Option<String>,
+    columns: Vec<String>,
+    where_clause: Option<String>,
+    limit: Option<u32>,
+    offset: Option<u32>,
+    join_clauses: Option<Vec<JoinClause>>,
+}
+
+
+fn configure_select_query(query: &SelectQueryRef, sql: &mut String) {
+    let cols = if query.columns.is_empty() { "*" } else { &query.columns.join(", ") };
+    sql.push_str(&format!("SELECT {} FROM {} ", cols, query.table));
+}
+
+fn configure_join_query(query: &JoinQueryRef, sql: &mut String) {
+    for join in query.join_clauses {
+        sql.push_str(&format!(" JOIN {} ON {}", join.table, join.condition));
+    }
+}
+
+fn configure_paginated_query(query: &PaginatedQueryRef, sql: &mut String) {
+    sql.push_str(&format!(" LIMIT {} OFFSET {}", query.limit, query.offset));
 }
 
 fn main() {
-    let mut magic_number = 1;
-    let vector = vec![0u8; 768];
-    let semantic_only_ref = 100;
-
-    let mut search = Search {
-        query: Some("rust search".to_string()),
-        offset: 0,
-        limit: 10,
-        words_limit: Some(5),
-        vector: Some(&vector),
-        ratio: Some(0.5),
-        mut_number: &mut magic_number,
-        semantic_only_ref: &semantic_only_ref,
+    // Assume unknown query configuration (could come from API request, config file, etc.)
+    let query_builder = QueryBuilder {
+        table: Some("users".to_string()),
+        columns: vec!["id".to_string(), "name".to_string(), "email".to_string()],
+        where_clause: Some("active = true".to_string()),
+        limit: Some(50),
+        offset: Some(0),
+        join_clauses: Some(vec![JoinClause {
+            table: "profiles".to_string(),
+            condition: "users.id = profiles.user_id".to_string(),
+        }]),
     };
-
-    // Try to convert to different view types
-    if let Some(keyword) = search.as_keyword_search() {
-        println!("Query: {}", keyword.query);
-        println!("Offset: {}", keyword.offset);
+    
+    let mut sql = String::new();
+    if let Some(query) = query_builder.as_select_query() {
+        configure_select_query(&query, &mut sql);
+    }
+    else {
+        panic!("Not valid query");
+    }
+    if let Some(query) = query_builder.as_join_query() {
+        configure_join_query(&query, &mut sql);
+    }
+    if let Some(query) = query_builder.as_paginated_query() {
+        configure_paginated_query(&query, &mut sql);
+    }
+    if let Some(where_clause) = query_builder.where_clause {
+        sql.push_str(&format!(" WHERE {}", where_clause));
     }
 
-    if let Some(mut hybrid) = search.as_hybrid_search_mut() {
-        *hybrid.mut_number += 1;  // Modify through the view
-        println!("Ratio: {}", hybrid.ratio);
-    }
+    println!("Generated SQL Query: {}", sql);
+}
+```
 
-    let semantic_search = search.into_semantic_search().unwrap();
-    println!("Vector length: {}", semantic_search.vector.len());
+### Example Using Generated Variant Enum
+
+```rust
+use view_types::views;
+
+// Debug only validation
+#[inline]
+fn validate_health(health: &f32) -> bool {
+    #[cfg(debug_assertions)]
+    { *health >= 0.0 && *health <= 100.0 }
+    #[cfg(not(debug_assertions))]
+    { true }
+}
+
+#[derive(Debug, Clone)]
+pub enum Team { Blue, Red, Neutral }
+
+#[derive(Debug, Clone)]
+pub enum WeaponType { Sword, Bow, Staff }
+
+#[views(
+    frag positioned {
+        entity_id,
+        position_x,
+        position_y,
+    }
+    
+    frag living {
+        Some(health) if validate_health(health),
+        max_health,
+        team,
+    }
+    
+    #[derive(Debug, Clone)]
+    pub view Player {
+        ..positioned,
+        ..living,
+        player_name,
+        level,
+        weapon,
+    }
+    
+    #[derive(Debug, Clone)]
+    pub view Npc {
+        ..positioned,
+        ..living,
+        npc_type,
+        ai_state,
+    }
+    
+    #[derive(Debug, Clone)]
+    pub view Projectile {
+        ..positioned,
+        velocity_x,
+        velocity_y,
+        team,
+        damage: u32,
+    }
+)]
+pub struct GameEntity {
+    entity_id: u64,
+    position_x: f32,
+    position_y: f32,
+    health: Option<f32>,
+    max_health: f32,
+    team: Team,
+    damage: u32,
+    player_name: String,
+    level: u32,
+    weapon: WeaponType,
+    npc_type: String,
+    ai_state: String,
+    velocity_x: f32,
+    velocity_y: f32,
+}
+
+fn main() {
+    // Simulate game entities
+    let entities = vec![
+        GameEntityVariant::Player(Player {
+            entity_id: 1,
+            position_x: 100.0,
+            position_y: 200.0,
+            health: 85.0,
+            max_health: 100.0,
+            team: Team::Blue,
+            player_name: "Alice".to_string(),
+            level: 12,
+            weapon: WeaponType::Sword,
+        }),
+        
+        GameEntityVariant::Npc(Npc {
+            entity_id: 2,
+            position_x: 300.0,
+            position_y: 150.0,
+            health: 60.0,
+            max_health: 80.0,
+            team: Team::Neutral,
+            npc_type: "Merchant".to_string(),
+            ai_state: "Idle".to_string(),
+        }),
+        
+        GameEntityVariant::Projectile(Projectile {
+            entity_id: 3,
+            position_x: 120.0,
+            position_y: 210.0,
+            velocity_x: 200.0,
+            velocity_y: -50.0,
+            team: Team::Blue,
+            damage: 25,
+        }),
+    ];
+    
+    // Use generated getters directly - no pattern matching required!
+    for entity in &entities {
+        // These are common for all so it is automatically generated without an option
+        println!("Entity {} at ({:.0}, {:.0})", entity.entity_id(), entity.position_x(), entity.position_y());
+        let near_center = entities.iter()
+            .filter(|e| {
+                let dx = e.position_x() - 200.0;
+                let dy = e.position_y() - 175.0;
+                dx * dx + dy * dy <= 100.0 * 100.0
+            })
+        .count();
+        println!("\nEntities near center: {}", near_center);
+        
+        // Access fields that exist only in some variants (uses options)
+        if let Some(health) = entity.health() {
+            println!("  Health: {:.0}/{:.0}", health, entity.max_health().unwrap());
+        }
+        if let Some(player_name) = entity.player_name() {
+            println!("  Player: {}", player_name);
+        }
+        if let Some(npc_type) = entity.npc_type() {
+            println!("  NPC: {}", npc_type);
+        }
+    }
+    
+    // Pattern matching for type-specific behavior
+    for entity in &entities {
+        match entity {
+            GameEntityVariant::Player(player) => {
+                println!("Player {} with {:?}", player.player_name, player.weapon);
+            },
+            GameEntityVariant::Projectile(proj) => {
+                println!("Projectile: damage {}, velocity ({:.0}, {:.0})", 
+                    proj.damage, proj.velocity_x, proj.velocity_y);
+            },
+            _ => {
+                println!("Other entity type");
+            }
+        }
+    }
 }
 ```
