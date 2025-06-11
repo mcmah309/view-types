@@ -85,9 +85,9 @@ pub struct Search<'a> {
     result1: Result<usize, String>,
 }
 ```
-<details>
 
 See the macro expansion below to understand the generated code.
+<details>
 
 <summary>Expansion</summary>
 
