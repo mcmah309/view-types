@@ -1,8 +1,8 @@
-# View-types: A Concise Approach to Complex Data Modeling in Rust
+# View-types: A Concise Way To Model Data With View Projections
 
 [<img alt="crates.io" src="https://img.shields.io/crates/v/view-types.svg?style=for-the-badge&color=fc8d62&logo=rust" height="20">](https://crates.io/crates/view-types)
 
-The `views` macro provides a declarative way to define type-safe projections from a single source-of-truth data structure declaration. These projections provide different ways of modeling data and minimizes the necessary boilerplate.
+The `views` macro provides a declarative way to define type-safe projections from a single source-of-truth data structure declaration. These projections provide different ways of representing data with overlapping fields or needing runtime validation, and minimizes the necessary boilerplate. This can even be made more powerful when combined with the builder pattern ([example](https://github.com/mcmah309/view-types/blob/1137d4bb7a20d405d01a5a6c79ddb19c158a5c89/tests/mod.rs#L182) with [bon](https://crates.io/crates/bon)).
 
 Jump straight to [examples](#examples) to see it in action.
 
