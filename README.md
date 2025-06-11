@@ -4,7 +4,9 @@
 
 The `views` macro provides a declarative way to define type-safe projections from a single source-of-truth data structure declaration. These projections provide different ways of modeling data and minimizes the necessary boilerplate.
 
-## Basic Syntax And Usage
+Jump straight to [examples](#examples) to see it in action.
+
+## Basic Syntax
 
 ```rust
 use view_types::views;
@@ -13,7 +15,7 @@ fn validate_ratio(ratio: &f32) -> bool {
     *ratio >= 0.0 && *ratio <= 1.0
 }
 
-enum CannotInferType {
+enum EnumVariant {
     Branch1(String),
     Branch2(usize),
 }
@@ -24,21 +26,21 @@ enum CannotInferType {
         // Declaring a field to be included
         offset,
         limit,
-        // branch extraction with pattern matching
-        CannotInferType::Branch1(cannot_infer_type: String),
-        // Result unwrapping
+        // Enum pattern matching extraction with explicit type declaration
+        EnumVariant::Branch1(cannot_infer_type: String),
+        // Result pattern matching extraction
         Ok(result1),
     }
     
     frag keyword {
-        // Option unwrapping
+        // Option pattern matching extraction
         Some(query),
         // Explicit type declaration
         words_limit: Option<usize>
     }
     
     frag semantic {
-        // Option unwrapping with validation
+        // Option pattern matching extraction with validation
         Some(vector) if vector.len() == 768,
         mut_number
     }
@@ -46,7 +48,7 @@ enum CannotInferType {
     // A view is a projection/subset of fields
     #[derive(Debug, Clone)]
     pub view KeywordSearch {
-        // Expanding a fragment to include all fields
+        // Expanding a fragment to include all fields in this view
         ..all,
         ..keyword,
     }
@@ -77,11 +79,14 @@ pub struct Search<'a> {
     mut_number: &'a mut usize,
     field_never_used: bool,
     semantic_only_ref: &'a usize,
-    cannot_infer_type: CannotInferType,
+    cannot_infer_type: EnumVariant,
     result1: Result<usize, String>,
 }
 ```
 <details>
+
+See the macro expansion below to understand the generated code.
+
 <summary>Expansion</summary>
 
 ```rust,ignore
@@ -98,7 +103,7 @@ pub struct Search<'a> {
     mut_number: &'a mut usize,
     field_never_used: bool,
     semantic_only_ref: &'a usize,
-    cannot_infer_type: CannotInferType,
+    cannot_infer_type: EnumVariant,
     result1: Result<usize, String>,
 }
 #[derive(Debug, Clone)]
@@ -354,7 +359,7 @@ impl<'original, 'a> Search<'a> {
         Some(KeywordSearch {
             offset: self.offset,
             limit: self.limit,
-            cannot_infer_type: if let CannotInferType::Branch1(cannot_infer_type) =
+            cannot_infer_type: if let EnumVariant::Branch1(cannot_infer_type) =
                 self.cannot_infer_type
             {
                 cannot_infer_type
@@ -378,7 +383,7 @@ impl<'original, 'a> Search<'a> {
         Some(KeywordSearchRef {
             offset: &self.offset,
             limit: &self.limit,
-            cannot_infer_type: if let CannotInferType::Branch1(cannot_infer_type) =
+            cannot_infer_type: if let EnumVariant::Branch1(cannot_infer_type) =
                 &self.cannot_infer_type
             {
                 cannot_infer_type
@@ -408,7 +413,7 @@ impl<'original, 'a> Search<'a> {
                 let limit = &mut self.limit;
                 limit
             },
-            cannot_infer_type: if let CannotInferType::Branch1(cannot_infer_type) =
+            cannot_infer_type: if let EnumVariant::Branch1(cannot_infer_type) =
                 &mut self.cannot_infer_type
             {
                 cannot_infer_type
@@ -435,7 +440,7 @@ impl<'original, 'a> Search<'a> {
         Some(SemanticSearch {
             offset: self.offset,
             limit: self.limit,
-            cannot_infer_type: if let CannotInferType::Branch1(cannot_infer_type) =
+            cannot_infer_type: if let EnumVariant::Branch1(cannot_infer_type) =
                 self.cannot_infer_type
             {
                 cannot_infer_type
@@ -466,7 +471,7 @@ impl<'original, 'a> Search<'a> {
         Some(SemanticSearchRef {
             offset: &self.offset,
             limit: &self.limit,
-            cannot_infer_type: if let CannotInferType::Branch1(cannot_infer_type) =
+            cannot_infer_type: if let EnumVariant::Branch1(cannot_infer_type) =
                 &self.cannot_infer_type
             {
                 cannot_infer_type
@@ -500,7 +505,7 @@ impl<'original, 'a> Search<'a> {
                 let limit = &mut self.limit;
                 limit
             },
-            cannot_infer_type: if let CannotInferType::Branch1(cannot_infer_type) =
+            cannot_infer_type: if let EnumVariant::Branch1(cannot_infer_type) =
                 &mut self.cannot_infer_type
             {
                 cannot_infer_type
@@ -537,7 +542,7 @@ impl<'original, 'a> Search<'a> {
         Some(HybridSearch {
             offset: self.offset,
             limit: self.limit,
-            cannot_infer_type: if let CannotInferType::Branch1(cannot_infer_type) =
+            cannot_infer_type: if let EnumVariant::Branch1(cannot_infer_type) =
                 self.cannot_infer_type
             {
                 cannot_infer_type
@@ -584,7 +589,7 @@ impl<'original, 'a> Search<'a> {
         Some(HybridSearchRef {
             offset: &self.offset,
             limit: &self.limit,
-            cannot_infer_type: if let CannotInferType::Branch1(cannot_infer_type) =
+            cannot_infer_type: if let EnumVariant::Branch1(cannot_infer_type) =
                 &self.cannot_infer_type
             {
                 cannot_infer_type
@@ -631,7 +636,7 @@ impl<'original, 'a> Search<'a> {
                 let limit = &mut self.limit;
                 limit
             },
-            cannot_infer_type: if let CannotInferType::Branch1(cannot_infer_type) =
+            cannot_infer_type: if let EnumVariant::Branch1(cannot_infer_type) =
                 &mut self.cannot_infer_type
             {
                 cannot_infer_type
@@ -695,7 +700,7 @@ Fragments allow you to group related field extractions and reuse them across mul
 frag all {
     offset,                                           // Simple field extraction
     limit,
-    CannotInferType::Branch1(cannot_infer_type: String), // Enum pattern matching
+    EnumVariant::Branch1(cannot_infer_type: String), // Enum pattern matching
     Ok(result1),                                      // Result unwrapping
     Err(result2)
 }
@@ -766,7 +771,7 @@ impl Search<'_> {
         Some(KeywordSearch {
             offset: self.offset,
             limit: self.limit,
-            cannot_infer_type: if let CannotInferType::Branch1(cannot_infer_type) = 
+            cannot_infer_type: if let EnumVariant::Branch1(cannot_infer_type) = 
                 self.cannot_infer_type {
                 cannot_infer_type
             } else {
@@ -788,7 +793,7 @@ impl Search<'_> {
 }
 ```
 
-## Usage Examples
+## Examples
 
 ### Example Using Monolith
 
@@ -810,7 +815,6 @@ pub struct JoinClause {
 }
 
 #[views(
-
     frag base {
         Some(table) if validate_table_name(table),
         columns,
