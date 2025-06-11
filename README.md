@@ -6,6 +6,8 @@ The `views` macro provides a declarative way to define type-safe projections fro
 
 Jump straight to [examples](#examples) to see it in action.
 
+Article: [Solving Rust Data Modeling with View-Types: A Macro-Driven Approach](https://mcmah309.github.io/posts/solving-data-modeling-in-rust-with-view-types/)
+
 ## Syntax
 
 ### Syntax Example
