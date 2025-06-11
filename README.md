@@ -721,7 +721,7 @@ frag semantic {
 
 Views are projections of the annotated structs data. They contain fragments and fields to be included in the projection.
 
-```rust
+```rust,ignore
 // Annotations for the generated *Ref struct
 #[Ref(
     #[derive(Clone)]
@@ -743,7 +743,7 @@ pub view HybridSearch<'a> {
 ### Configuration
 #### Variant
 In addition to the structs generated for each view (each view has a owned, ref, and mut struct). There is also a generated enum variant of the views. e.g.
-```rust
+```rust,ignore
 pub enum SearchVariant<'a> {
     KeywordSearch(KeywordSearch),
     SemanticSearch(SemanticSearch<'a>),
