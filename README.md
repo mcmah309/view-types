@@ -6,7 +6,9 @@ The `views` macro provides a declarative way to define type-safe projections fro
 
 Jump straight to [examples](#examples) to see it in action.
 
-## Basic Syntax
+## Syntax
+
+### Syntax Example
 
 ```rust
 use view_types::views;
@@ -690,9 +692,7 @@ impl<'original, 'a> Search<'a> {
 
 </details>
 
-## Declaration
-
-### Fragment-Based Composition
+### Fragment-Based Grouping
 
 Fragments allow you to group related field extractions and reuse them across multiple views:
 
@@ -706,8 +706,6 @@ frag all {
 }
 ```
 
-### Runtime Validation with Compile-Time Safety
-
 The macro supports conditional field extraction with custom validation:
 
 ```rust,ignore
@@ -717,80 +715,44 @@ frag semantic {
 }
 ```
 
-## Generation
+### Views
 
-### Automatic Type Generation
+Views are projections of the annotated structs data. They contain fragments and fields to be included in the projection.
 
-The macro automatically generates a corresponding type and reference types with proper lifetime management for each view:
-
-```rust,ignore
-// From this declaration:
-pub view KeywordSearch {
+```rust
+// Annotations for the generated *Ref struct
+#[Ref(
+    #[derive(Clone)]
+)]
+// Annotations for the generated *Mut struct
+#[Mut(
+    #[derive(Debug)]
+)]
+#[derive(Debug)]
+pub view HybridSearch<'a> {
+    // fragment expansion
     ..all,
     ..keyword,
-}
-...
-```
-```rust,ignore
-// Generated automatically
-pub struct KeywordSearch {
-    offset: usize,
-    limit: usize,
-    query: String,
-    // ... other fields
-}
-
-pub struct KeywordSearchRef<'original> {
-    offset: &'original usize,
-    limit: &'original usize,
-    query: &'original String,
-    // ... other fields
-}
-
-pub struct KeywordSearchMut<'original> {
-    offset: &'original mut usize,
-    limit: &'original mut usize,
-    query: &'original mut String,
-    // ... other fields
+    ..semantic,
+    // direct field inclusion with pattern matching and validation (same syntax as in a fragment)
+    Some(ratio) if validate_ratio(ratio)
 }
 ```
-
-### Access Patterns
-
-For each view, the macro generates three access methods e.g.:
-
-- **Owned conversion**: `into_keyword_search()` - Returns ``Option<KeywordSearch>`
-- **Immutable borrowing**: `as_keyword_search()` - Returns `Option<KeywordSearchRef<'...>>`
-- **Mutable borrowing**: `as_keyword_search_mut()` - Returns `Option<KeywordSearchMut<'...>>`
-
-e.g.
-
-```rust,ignore
-impl Search<'_> {
-    pub fn into_keyword_search(self) -> Option<KeywordSearch> {
-        Some(KeywordSearch {
-            offset: self.offset,
-            limit: self.limit,
-            cannot_infer_type: if let EnumVariant::Branch1(cannot_infer_type) = 
-                self.cannot_infer_type {
-                cannot_infer_type
-            } else {
-                return None;
-            },
-            result1: if let Ok(result1) = self.result1 {
-                result1
-            } else {
-                return None;
-            },
-            query: if let Some(query) = self.query {
-                query
-            } else {
-                return None;
-            },
-            words_limit: self.words_limit,
-        })
-    }
+### Configuration
+#### Variant
+In addition to the structs generated for each view (each view has a owned, ref, and mut struct). There is also a generated enum variant of the views. e.g.
+```rust
+pub enum SearchVariant<'a> {
+    KeywordSearch(KeywordSearch),
+    SemanticSearch(SemanticSearch<'a>),
+    HybridSearch(HybridSearch<'a>),
 }
+```
+Annotations for this type can be applied with the `Variant` annotation directly on the original struct.
+```rust
+#[Variant(
+    #[derive(Debug)]
+)]
 ```
 
 ## Examples
